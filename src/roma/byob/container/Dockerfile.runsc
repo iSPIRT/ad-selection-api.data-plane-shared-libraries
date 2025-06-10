@@ -1,0 +1,91 @@
+FROM golang:1.23.4-bookworm AS clang
+ARG CLANG_VER=18
+ARG TARGETARCH
+
+# install clang and crossbuild
+ADD https://apt.llvm.org/llvm.sh /tmp/llvm.sh
+RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
+  --mount=target=/var/cache/apt,type=cache,sharing=locked \
+  rm -f /etc/apt/apt.conf.d/docker-clean \
+  && apt-get update \
+  && apt-get --quiet install -y --no-install-recommends \
+  crossbuild-essential-amd64="12.9*" \
+  crossbuild-essential-arm64="12.9*" \
+  gnupg="2.2.*" \
+  libbpf-dev="1:1.1.0-*" \
+  "$(test "${TARGETARCH}" = amd64 && echo libc6-dev-i386="2.36-*" || true)" \
+  lsb-release="12.0-*" \
+  software-properties-common="0.99.*" \
+  unzip="6.0-*" \
+  wget="1.21.*" \
+  && chmod +x /tmp/llvm.sh \
+  && /tmp/llvm.sh ${CLANG_VER} \
+  && apt-get --quiet install -y --no-install-recommends libc++-${CLANG_VER}-dev libc++abi-${CLANG_VER}-dev libclang-${CLANG_VER}-dev \
+  && for p in clang lldb lld ld.lld; do update-alternatives --install /usr/bin/${p} ${p} /usr/bin/${p}-${CLANG_VER} 100; done \
+  && rm -f /tmp/llvm.sh
+
+ENV \
+  CC=/usr/bin/clang \
+  CXX=/usr/bin/clang++ \
+  TZ=Etc/UTC
+
+#
+# install bazelisk and bazel
+#
+FROM clang AS build-env
+ARG BAZELISK_VERSION=1.24.1
+
+ENV \
+  BAZEL_CXXOPTS=-stdlib=libc++ \
+  BAZEL_LINKOPTS=-lc++:-lm \
+  BAZEL_ROOT=/bazel_root \
+  USE_BAZEL_VERSION=7.4.1
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+  --mount=type=cache,target=/root/.cache/go-build \
+  go install github.com/bazelbuild/bazelisk@v${BAZELISK_VERSION} \
+  && ln -s ${GOPATH}/bin/bazelisk /usr/local/bin/bazel \
+  && bazel version
+
+COPY --chmod=555 generate_system_bazelrc /tmp
+
+RUN cd /tmp \
+  && touch WORKSPACE \
+  && ./generate_system_bazelrc \
+  && rm -f WORKSPACE generate_system_bazelrc
+
+#
+# fetch gvisor sources
+#
+FROM build-env as gvisor-srcs
+# 9fcf0b5 2024-12-13
+ARG GVISOR_COMMIT=9fcf0b5b5360d9314aa355c83a8f16fbe4e69e97
+
+ENV WORKSPACE=/workspace
+COPY gvisor.patch /tmp
+ADD "https://github.com/google/gvisor/archive/${GVISOR_COMMIT}.zip" /tmp/gvisor.zip
+RUN unzip -q /tmp/gvisor.zip -d /workspace \
+  && mv "/workspace/gvisor-${GVISOR_COMMIT}" /workspace/gvisor \
+  && patch -p1 --directory=/workspace/gvisor --input=/tmp/gvisor.patch \
+  && rm --force /tmp/gvisor.zip
+
+#
+# build runsc
+#
+FROM gvisor-srcs AS runsc-build
+WORKDIR /workspace/gvisor
+RUN --mount=type=cache,target=/root/.cache/bazel \
+  --mount=type=cache,target=/bazel_root/gvisor_build \
+  bazel build \
+  --cache_test_results=no \
+  --curses=no \
+  --progress_report_interval=10 \
+  --show_progress_rate_limit=10 \
+  //runsc \
+  && cp /workspace/gvisor/bazel-bin/runsc/runsc_/runsc /tmp
+
+#
+# export the runsc binary
+#
+FROM scratch AS runsc-binary
+COPY --from=runsc-build /tmp/runsc /

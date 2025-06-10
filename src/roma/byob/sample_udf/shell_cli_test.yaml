@@ -1,0 +1,103 @@
+# Copyright 2024 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Refer to docs at https://github.com/GoogleContainerTools/container-structure-test.
+
+schemaVersion: 2.0.0
+
+containerRunOptions:
+  privileged: true
+
+licenseTests:
+  - debian: true
+
+metadataTest:
+  entrypoint:
+    - /tools/shell-cli
+
+fileExistenceTests:
+  - name: entrypoint
+    path: /tools/shell-cli
+    permissions: -r-xr-xr-x
+    isExecutableBy: owner
+    shouldExist: true
+
+commandTests:
+  - name: shell-cli cli help
+    command: /tools/shell-cli
+    args: ['--help=_shell.cc']
+    exitCode: 1
+    expectedOutput:
+      - |
+        ^shell-cli: Opens a privacy_sandbox.server_common.byob.SampleService shell.
+
+          Flags from bazel-out/.*/bin/src/roma/byob/sample_udf/sample_shell.cc:
+            --commands_file \(Text file containing shell commands to execute\.\);
+              default: ;
+            --num_workers \(Number of workers\.\); default: 1;
+            --sandbox \(Run BYOB with mode: gvisor, gvisor-debug, minimal\.\);
+              default: minimal;
+            --syscall_filter \(Whether to enable syscall filtering\.\); default: false;
+            --udf_log_file \(Directory for storing UDF logs\.\); default: ;
+
+  - name: shell-cli sandbox flag
+    command: /tools/shell-cli
+    args: ['--sandbox=unknown']
+    exitCode: 1
+    expectedError:
+      - "ERROR: Illegal value 'unknown' specified for flag 'sandbox'; Supported values: gvisor, gvisor-debug, minimal."
+
+  - name: shell-cli help commands file
+    command: /tools/shell-cli
+    args: ['--commands_file=/tools/help.commands']
+    exitCode: 0
+    expectedOutput:
+      - |
+        ^Commands:
+
+             commands <filename>
+                Load and execute commands from a file\. Note: Recursion is not permitted\.
+
+             load <command> <filename>
+                Load a User Defined Function \(UDF\)\. Example: load Sample \/path\/to\/udf\/example_udf
+
+        ByobSampleService commands:
+          Usage: <rpc> <request_file> \[<response_file>\]
+
+             Sample
+                The Sample method MethodAnnotation\. Add some information about this rpc
+                method\.
+
+             ReadPayload
+                MethodAnnotation\. Add some information about this rpc method\.
+
+             GeneratePayload
+                MethodAnnotation\. Add some information about this rpc method\.
+
+             RunPrimeSieve
+                MethodAnnotation
+
+             SortList
+                MethodAnnotation
+
+             Log
+                MethodAnnotation
+
+        Other commands:
+
+             help
+                Display all shell commands
+
+             exit
+                Exit the tool

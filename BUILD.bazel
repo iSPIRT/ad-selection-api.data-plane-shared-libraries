@@ -1,0 +1,223 @@
+# Copyright 2023 Google LLC
+# Copyright (C) Microsoft Corporation. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+load("@aspect_rules_js//npm:defs.bzl", "npm_link_package")
+load("@bazel_gazelle//:def.bzl", "gazelle", "gazelle_binary")
+load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@rules_license//rules:license.bzl", "license")
+
+package(
+    default_applicable_licenses = [":license"],
+)
+
+license(
+    name = "license",
+    copyright_notice = "Copyright 2024 Google LLC",
+    license_kinds = [
+        "@rules_license//licenses/spdx:Apache-2.0",
+    ],
+    license_text = "LICENSE",
+    package_url = "https://github.com/privacysandbox/data-plane-shared-libraries",
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    srcs = ["LICENSE"],
+    visibility = ["//visibility:public"],
+)
+
+npm_link_all_packages(name = "node_modules")
+
+npm_link_package(
+    name = "node_modules/flatbuffers",
+    src = "@com_github_google_flatbuffers//ts:flatbuffers",
+)
+
+string_flag(
+    name = "platform",
+    build_setting_default = "aws",
+    values = [
+        "aws",
+        "azure",
+        "gcp",
+        "local",
+    ],
+    visibility = ["//src:__subpackages__"],
+)
+
+config_setting(
+    name = "aws_platform",
+    flag_values = {
+        ":platform": "aws",
+    },
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "azure_platform",
+    flag_values = {
+        ":platform": "azure",
+    },
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "gcp_platform",
+    flag_values = {
+        ":platform": "gcp",
+    },
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "local_platform",
+    flag_values = {
+        ":platform": "local",
+    },
+    visibility = ["//visibility:public"],
+)
+
+string_flag(
+    name = "instance",
+    build_setting_default = "aws",
+    values = [
+        "aws",
+        "azure",
+        "gcp",
+        "local",
+    ],
+    visibility = ["//src:__subpackages__"],
+)
+
+config_setting(
+    name = "aws_instance",
+    flag_values = {
+        ":instance": "aws",
+    },
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "azure_instance",
+    flag_values = {
+        ":instance": "azure",
+    },
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "gcp_instance",
+    flag_values = {
+        ":instance": "gcp",
+    },
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "local_instance",
+    flag_values = {
+        ":instance": "local",
+    },
+    visibility = ["//visibility:public"],
+)
+
+string_flag(
+    name = "build_flavor",
+    build_setting_default = "prod",
+    values = [
+        "prod",
+        "non_prod",
+        "non_sapi",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "prod_build",
+    flag_values = {
+        ":build_flavor": "prod",
+    },
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "non_prod_build",
+    flag_values = {
+        ":build_flavor": "non_prod",
+    },
+    visibility = ["//visibility:public"],
+)
+
+# Another non-production mode with an even less restrictive environment than
+# non_prod_build
+config_setting(
+    name = "non_sapi_build",
+    flag_values = {
+        ":build_flavor": "non_sapi",
+    },
+    visibility = ["//visibility:public"],
+)
+
+genrule(
+    name = "collect-coverage",
+    outs = ["collect_coverage.bin"],
+    cmd_bash = """cat << EOF > '$@'
+builders/tools/collect-coverage "\\$$@"
+EOF""",
+    executable = True,
+    local = True,
+    message = "generate coverage report",
+)
+
+genrule(
+    name = "collect-test-logs",
+    outs = ["collect_test_logs.bin"],
+    cmd_bash = """cat << EOF > '$@'
+scripts/collect-test-logs "\\$$@"
+EOF""",
+    executable = True,
+    local = True,
+    message = "copy bazel test logs",
+)
+
+gazelle_binary(
+    name = "gazelle-buf",
+    languages = [
+        "@bazel_gazelle//language/proto:go_default_library",
+        "@rules_buf//gazelle/buf:buf",
+    ],
+)
+
+gazelle(
+    name = "gazelle",
+    gazelle = ":gazelle-buf",
+)
+
+gazelle(
+    name = "update-buf-deps",
+    args = [
+        "-from_file=buf.work.yaml",
+        "-to_macro=deps.bzl%buf_deps",
+        "-prune",
+    ],
+    command = "update-repos",
+    gazelle = ":gazelle-buf",
+)
+
+filegroup(
+    name = "clang_tidy_config",
+    srcs = [".clang-tidy"],
+)

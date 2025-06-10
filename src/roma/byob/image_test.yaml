@@ -1,0 +1,91 @@
+# Copyright 2024 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Refer to docs at https://github.com/GoogleContainerTools/container-structure-test.
+
+schemaVersion: 2.0.0
+
+metadataTest:
+  user: {UID}
+
+fileExistenceTests:
+  - name: /roma_container dir
+    path: /roma_container
+    shouldExist: true
+    permissions: drwxr-xr-x
+    uid: {UID}
+    gid: {GID}
+
+  - name: /roma_container config.json
+    path: /roma_container/config.json
+    shouldExist: true
+    permissions: -rw-------
+    uid: {UID}
+    gid: {GID}
+
+  - name: /run_workers
+    path: /run_workers
+    shouldExist: true
+    permissions: drwx------
+    uid: {UID}
+    gid: {GID}
+
+  - name: /var/run/runsc dir
+    path: /var/run/runsc
+    shouldExist: true
+    permissions: drwx------
+    uid: {UID}
+    gid: {GID}
+
+  - name: /usr/byob/gvisor/bin/runsc
+    path: /usr/byob/gvisor/bin/runsc
+    permissions: -r-x------
+    isExecutableBy: owner
+    uid: {UID}
+    gid: {GID}
+
+  - name: /usr/byob/nsjail/bin/nsjail
+    path: /usr/byob/nsjail/bin/nsjail
+    permissions: -r-x------
+    isExecutableBy: owner
+    uid: {UID}
+    gid: {GID}
+
+  - name: /usr/byob/nsjail/lib/libprotobuf.so.17
+    path: /usr/byob/nsjail/lib/libprotobuf.so.17
+    permissions: -r-x------
+    isExecutableBy: owner
+    uid: {UID}
+    gid: {GID}
+
+  - name: /usr/byob/nsjail/lib/libnl-route-3.so.200
+    path: /usr/byob/nsjail/lib/libnl-route-3.so.200
+    permissions: -r-x------
+    isExecutableBy: owner
+    uid: {UID}
+    gid: {GID}
+
+  - name: /usr/byob/nsjail/lib/libnl-3.so.200
+    path: /usr/byob/nsjail/lib/libnl-3.so.200
+    permissions: -r-x------
+    isExecutableBy: owner
+    uid: {UID}
+    gid: {GID}
+
+  - name: /usr/byob/nsjail/lib/libz.so.1
+    path: /usr/byob/nsjail/lib/libz.so.1
+    permissions: -r-x------
+    isExecutableBy: owner
+    uid: {UID}
+    gid: {GID}

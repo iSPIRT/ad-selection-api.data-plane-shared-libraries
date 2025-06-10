@@ -1,0 +1,355 @@
+# Copyright 2024 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+load("@aspect_bazel_lib//lib:expand_template.bzl", "expand_template")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+load("@rules_pkg//pkg:mappings.bzl", "pkg_attributes", "pkg_files")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+load("//src/roma/tools/api_plugin:roma_api.bzl", "roma_byob_image")
+load("//third_party:container_deps.bzl", "DISTROLESS_USERS")
+
+cc_library(
+    name = "example_roma_byob_app_service",
+    hdrs = ["example_roma_byob_app_service.h"],
+    deps = [
+        "//src/roma/byob/config",
+        "//src/roma/byob/example:example_cc_proto",
+        "//src/roma/byob/interface:roma_service",
+        "//src/roma/config",
+        "//src/util:execution_token",
+        "//src/util/status_macro:status_macros",
+        "@com_google_absl//absl/functional:any_invocable",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/synchronization",
+    ],
+)
+
+cc_binary(
+    name = "example_benchmark",
+    srcs = ["example_benchmark.cc"],
+    deps = [
+        ":example_roma_byob_app_service",
+        "//src/communication:json_utils",
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/flags:parse",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/synchronization",
+        "@google_benchmark//:benchmark",
+    ],
+)
+
+pkg_files(
+    name = "example_benchmark_execs",
+    srcs = [
+        ":example_benchmark",
+    ],
+    attributes = pkg_attributes(mode = "0500"),
+    prefix = "/tools",
+)
+
+pkg_files(
+    name = "example_benchmark_data",
+    srcs = [
+        ":echo_request.json",
+    ],
+    attributes = pkg_attributes(mode = "0400"),
+    prefix = "/tools",
+)
+
+[
+    pkg_tar(
+        name = "example_{test}_{flavor}_tar".format(
+            flavor = user.flavor,
+            test = test,
+        ),
+        srcs = [
+            ":example_{}_data".format(test),
+            ":example_{}_execs".format(test),
+        ],
+        owner = "{}.{}".format(
+            user.uid,
+            user.gid,
+        ),
+    )
+    for test in ("benchmark", "shell")
+    for user in DISTROLESS_USERS
+]
+
+[
+    roma_byob_image(
+        name = "example_{test}_{flavor}_image".format(
+            flavor = user.flavor,
+            test = test,
+        ),
+        container_structure_test_configs = [
+            ":example_{test}_image_{flavor}_test.yaml".format(
+                flavor = user.flavor,
+                test = test,
+            ),
+        ],
+        debug = True,
+        entrypoint = ["/tools/example_{test}".format(test = test)],
+        labels = {"tee.launch_policy.log_redirect": "always"},
+        repo_tags = ["example_{test}_image:v1-{flavor}".format(
+            flavor = user.flavor,
+            test = test,
+        )],
+        tars = [
+            ":example_{test}_{flavor}_tar".format(
+                flavor = user.flavor,
+                test = test,
+            ),
+            "//src/roma/byob/sample_udf:udf_{}_tar".format(user.flavor),
+        ],
+        user = user,
+    )
+    for test in ("benchmark", "shell")
+    for user in DISTROLESS_USERS
+]
+
+[
+    expand_template(
+        name = "example_{test}_image_{flavor}_test_yaml".format(
+            flavor = user.flavor,
+            test = test,
+        ),
+        out = "example_{test}_image_{flavor}_test.yaml".format(
+            flavor = user.flavor,
+            test = test,
+        ),
+        substitutions = {
+            "{GID}": str(user.gid),
+            "{UID}": str(user.uid),
+        },
+        template = ":example_{}_image_test.yaml".format(test),
+        visibility = ["//visibility:public"],
+    )
+    for test in ("benchmark", "shell")
+    for user in DISTROLESS_USERS
+]
+
+cc_binary(
+    name = "example_shell",
+    srcs = ["example_shell.cc"],
+    deps = [
+        ":example_roma_byob_app_service",
+        "//src/communication:json_utils",
+        "//src/roma/byob/tools:shell_evaluator",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/flags:parse",
+        "@com_google_absl//absl/flags:usage",
+        "@com_google_absl//absl/functional:function_ref",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+pkg_files(
+    name = "example_shell_execs",
+    srcs = [
+        ":example_shell",
+    ],
+    attributes = pkg_attributes(mode = "0500"),
+    prefix = "/tools",
+)
+
+pkg_files(
+    name = "example_shell_data",
+    srcs = [
+        ":echo_commands_file.txt",
+        ":echo_request.json",
+    ],
+    attributes = pkg_attributes(mode = "0400"),
+    prefix = "/tools",
+)
+
+genrule(
+    name = "tools_copy_to_dist",
+    srcs = [
+        ":empty.json",
+        ":sort_list_commands_file.txt",
+        "//src/roma/byob/sample_udf:sample_byob_sdk",
+        "//src/roma/byob/sample_udf:sort_list_10k_udf",
+    ],
+    outs = ["tools_copy_to_dist.bin"],
+    cmd_bash = """cat <<EOF >'$@'
+mkdir -p {dir}/sample_byob_sdk
+unzip -o $(execpath //src/roma/byob/sample_udf:sample_byob_sdk) -d {dir}/sample_byob_sdk
+mkdir -p {dir}/tools_test
+cp $(execpath :empty.json) {dir}/tools_test/empty.json
+cp $(execpath :sort_list_commands_file.txt) {dir}/tools_test/sort_list_commands_file.txt
+cp $(execpath //src/roma/byob/sample_udf:sort_list_10k_udf) {dir}/tools_test/sort_list_10k_udf
+builders/tools/normalize-dist
+EOF""".format(dir = "dist/roma_byob"),
+    executable = True,
+    local = True,
+    message = "copying aws artifacts to dist directory",
+)
+
+cc_binary(
+    name = "example_test",
+    srcs = ["example_test.cc"],
+    deps = [
+        ":example_roma_byob_app_service",
+        "//src/roma/byob/example:example_cc_proto",
+        "//src/roma/byob/utility:utils",
+        "//src/roma/config:function_binding_object_v2",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_binary(
+    name = "roma_byob_test",
+    srcs = ["roma_byob_test.cc"],
+    deps = [
+        "//src/roma/byob/sample_udf:sample_byob_sdk_cc_proto",
+        "//src/roma/byob/sample_udf:sample_byob_sdk_roma_cc_lib",
+        "//src/roma/byob/sample_udf:sample_callback_cc_proto",
+        "//src/roma/byob/utility:udf_blob",
+        "//src/roma/byob/utility:utils",
+        "//src/roma/config:function_binding_object_v2",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+pkg_files(
+    name = "test_execs",
+    srcs = [
+        ":example_test",
+        ":roma_byob_test",
+    ],
+    attributes = pkg_attributes(mode = "0500"),
+    prefix = "/server/bin",
+)
+
+[
+    pkg_tar(
+        name = "test_tar_{}".format(user.flavor),
+        srcs = [":test_execs"],
+        owner = "{}.{}".format(
+            user.uid,
+            user.gid,
+        ),
+    )
+    for user in DISTROLESS_USERS
+]
+
+TEST_NAME_TO_ENTRYPOINT_MAP = (
+    # (test_name, entrypoint)
+    (
+        "sample_test",
+        ["/server/bin/roma_byob_test"],
+    ),
+    (
+        "example_test",
+        ["/server/bin/example_test"],
+    ),
+)
+
+[
+    expand_template(
+        name = "{test_name}_{flavor}_image_test_yaml".format(
+            flavor = user.flavor,
+            test_name = test_name,
+        ),
+        out = "{test_name}_{flavor}_image_test.yaml".format(
+            flavor = user.flavor,
+            test_name = test_name,
+        ),
+        substitutions = {
+            "{COMMAND}": " ".join(entrypoint),
+            "{GID}": str(user.gid),
+            "{UID}": str(user.uid),
+        },
+        template = ":udf_image_tests.yaml",
+        visibility = ["//visibility:public"],
+    )
+    for user in DISTROLESS_USERS
+    for test_name, entrypoint in TEST_NAME_TO_ENTRYPOINT_MAP
+]
+
+[
+    roma_byob_image(
+        name = "{test_name}_{flavor}_image".format(
+            flavor = user.flavor,
+            test_name = test_name,
+        ),
+        container_structure_test_configs = [
+            "{test_name}_{flavor}_image_test.yaml".format(
+                flavor = user.flavor,
+                test_name = test_name,
+            ),
+        ],
+        container_structure_test_shard_count = 2,
+        container_structure_test_size = "large",
+        debug = False,
+        entrypoint = entrypoint,
+        labels = {"tee.launch_policy.log_redirect": "always"},
+        repo_tags = [
+            "roma_byob_{test_name}_image:v1-{flavor}".format(
+                flavor = user.flavor,
+                test_name = test_name,
+            ),
+        ],
+        tars = [
+            ":test_tar_{}".format(user.flavor),
+            "//src/roma/byob/sample_udf:udf_{}_tar".format(user.flavor),
+        ],
+        user = user,
+    )
+    for user in DISTROLESS_USERS
+    for test_name, entrypoint in TEST_NAME_TO_ENTRYPOINT_MAP
+]
+
+"""
+Sample usage:
+
+builders/tools/bazel-debian run //src/roma/byob/test:copy_to_dist
+docker load -i dist/roma_byob/sample_test_root_image.tar
+docker run -it --privileged roma_byob_sample_test_image:v1-root
+docker load -i dist/roma_byob/sample_test_nonroot_image.tar
+docker run -it --privileged roma_byob_sample_test_image:v1-nonroot
+"""
+
+genrule(
+    name = "copy_to_dist",
+    srcs = [
+        ":example_test_nonroot_image.tar",
+        ":example_test_root_image.tar",
+        ":sample_test_nonroot_image.tar",
+        ":sample_test_root_image.tar",
+    ],
+    outs = ["copy_to_dist.bin"],
+    cmd_bash = """cat <<EOF >'$@'
+mkdir -p {dir}
+cp $(execpath :example_test_nonroot_image.tar) {dir}/example_test_nonroot_image.tar
+cp $(execpath :example_test_root_image.tar) {dir}/example_test_root_image.tar
+cp $(execpath :sample_test_nonroot_image.tar) {dir}/sample_test_nonroot_image.tar
+cp $(execpath :sample_test_root_image.tar) {dir}/sample_test_root_image.tar
+builders/tools/normalize-dist
+EOF""".format(dir = "dist/roma_byob"),
+    executable = True,
+    local = True,
+    message = "copying aws artifacts to dist directory",
+)

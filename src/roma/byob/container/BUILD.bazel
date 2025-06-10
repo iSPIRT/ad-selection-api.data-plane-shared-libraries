@@ -1,0 +1,296 @@
+# Copyright 2024 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+load("@aspect_bazel_lib//lib:copy_file.bzl", "copy_file")
+load("@aspect_bazel_lib//lib:expand_template.bzl", "expand_template")
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+load("@rules_pkg//pkg:mappings.bzl", "pkg_attributes", "pkg_files", "pkg_mkdirs")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+load("//src/roma/byob/config:container.bzl", "roma_container_dir", "roma_container_root_dir", "run_workers_dir")
+load("//third_party:container_deps.bzl", "DISTROLESS_USERS", "container_image")
+
+[
+    expand_template(
+        name = "config-{}_json".format(arch),
+        out = "config-{}.json".format(arch),
+        substitutions = {
+            "@ld_library_path@": ld_library_path,
+        },
+        template = ":config.json.tmpl",
+    )
+    for arch, ld_library_path in (
+        ("aarch64", "/lib"),
+        ("amd64", "/lib64"),
+    )
+]
+
+alias(
+    name = "config_json",
+    actual = select({
+        "@platforms//cpu:aarch64": ":config-aarch64.json",
+        "@platforms//cpu:x86_64": ":config-amd64.json",
+    }),
+)
+
+copy_file(
+    name = "container_config",
+    src = ":config_json",
+    out = "config.json",
+    # TODO: b/383174230 - Revert once server teams move to rules_oci
+    visibility = ["//visibility:public"],
+)
+
+pkg_files(
+    name = "container_config_file",
+    srcs = [":container_config"],
+    attributes = pkg_attributes(mode = "0600"),
+)
+
+[
+    pkg_tar(
+        name = "container_config_{}.tar".format(user.user),
+        srcs = [":container_config_file"],
+        owner = "{}.{}".format(
+            user.uid,
+            user.gid,
+        ),
+    )
+    for user in DISTROLESS_USERS
+]
+
+genrule(
+    name = "nsjail_bin",
+    srcs = [
+        ":Dockerfile.nsjail",
+    ],
+    outs = [
+        "nsjail",
+        "libprotobuf.so.17",
+        "libnl-route-3.so.200",
+        "libnl-3.so.200",
+        "libz.so.1",
+    ],
+    cmd_bash = """set -o errexit
+set -o xtrace
+cp $(SRCS) "$(RULEDIR)"
+docker buildx build --progress plain --target nsjail-binary --output="$(RULEDIR)" --file="$(RULEDIR)"/Dockerfile.nsjail "$(RULEDIR)"
+""",
+)
+
+genrule(
+    name = "runsc_bin",
+    srcs = [
+        ":Dockerfile.runsc",
+        ":generate_system_bazelrc",
+        ":gvisor.patch",
+    ],
+    outs = ["runsc"],
+    cmd_bash = """set -o errexit
+cp $(SRCS) "$(RULEDIR)"
+docker buildx build --progress plain --target runsc-binary --output="$(RULEDIR)" --file="$(RULEDIR)"/Dockerfile.runsc "$(RULEDIR)"
+""",
+)
+
+pkg_files(
+    name = "gvisor_execs",
+    srcs = [":runsc"],
+    attributes = pkg_attributes(mode = "0500"),
+    prefix = "/usr/byob/gvisor/bin",
+)
+
+pkg_files(
+    name = "nsjail_execs",
+    srcs = [
+        ":nsjail",
+    ],
+    attributes = pkg_attributes(mode = "0500"),
+    prefix = "/usr/byob/nsjail/bin",
+)
+
+pkg_files(
+    name = "nsjail_libs",
+    srcs = [
+        ":libnl-3.so.200",
+        ":libnl-route-3.so.200",
+        ":libprotobuf.so.17",
+        ":libz.so.1",
+    ],
+    attributes = pkg_attributes(mode = "0500"),
+    prefix = "/usr/byob/nsjail/lib",
+)
+
+pkg_mkdirs(
+    name = "var_run_runsc_dir",
+    attributes = pkg_attributes(mode = "0700"),
+    dirs = ["/var/run/runsc"],
+    # TODO: b/383174230 - Revert once server teams move to rules_oci
+    visibility = ["//visibility:public"],
+)
+
+# Contains directories which need to be mounted into run_workers' pivot rooted
+# file system.
+# Namely, socket directory for AF_UNIX socket, log directory for log files and
+# eventually a directory containing binaries.
+# Initially, these directories created in /tmp. However, for AWS Nitro Enclave
+# /tmp is mounted with MS_NODEV | MS_NOSUID | MS_NOEXEC. This was causing bugs.
+# Details: b/367480293#comment4
+pkg_mkdirs(
+    name = "run_workers_mounts",
+    attributes = pkg_attributes(mode = "0700"),
+    dirs = [run_workers_dir],
+)
+
+[
+    pkg_tar(
+        name = "gvisor_tar_{}".format(user.flavor),
+        srcs = [
+            ":gvisor_execs",
+            ":nsjail_execs",
+            ":nsjail_libs",
+            ":run_workers_mounts",
+            ":var_run_runsc_dir",
+        ],
+        owner = "{}.{}".format(
+            user.uid,
+            user.gid,
+        ),
+        visibility = ["//visibility:public"],
+    )
+    for user in DISTROLESS_USERS
+]
+
+cc_binary(
+    name = "run_workers",
+    srcs = ["run_workers.cc"],
+    deps = [
+        "//src/roma/byob/dispatcher:dispatcher_cc_proto",
+        "//src/roma/byob/dispatcher:dispatcher_grpc",
+        "//src/roma/byob/dispatcher:interface",
+        "//src/roma/byob/utility:utils",
+        "//src/util/status_macro:status_macros",
+        "//src/util/status_macro:status_util",
+        "@com_github_grpc_grpc//:grpc++",
+        "@com_google_absl//absl/cleanup",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/flags:parse",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/log:initialize",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/types:span",
+        "@com_google_protobuf//:protobuf",
+        "@libcap",
+        "@libseccomp",
+        "@libuuid//:uuid",
+    ],
+)
+
+pkg_files(
+    name = "byob_runtime_execs",
+    srcs = [":run_workers"],
+    attributes = pkg_attributes(mode = "0500"),
+    prefix = "/server/bin",
+)
+
+[
+    pkg_tar(
+        name = "byob_runtime_tar_{}".format(user.flavor),
+        srcs = [":byob_runtime_execs"],
+        owner = "{}.{}".format(
+            user.uid,
+            user.gid,
+        ),
+    )
+    for user in DISTROLESS_USERS
+]
+
+[
+    genrule(
+        name = "gen_byob_runtime_container_tar_{}".format(arch),
+        outs = ["byob_runtime_base_{}.tar".format(arch)],
+        cmd_bash = """echo FROM {base_image} | docker buildx build --output=type=tar,dest=$@ --file=- .""".format(
+            base_image = container_image(
+                "runtime-debian-nondebug-nonroot",
+                arch,
+            ).uri,
+        ),
+        visibility = ["//visibility:public"],
+    )
+    for arch in ("arm64", "amd64")
+]
+
+alias(
+    name = "byob_runtime_base.tar",
+    actual = select({
+        "@platforms//cpu:aarch64": ":byob_runtime_base_arm64.tar",
+        "@platforms//cpu:x86_64": ":byob_runtime_base_amd64.tar",
+    }),
+    visibility = ["//visibility:public"],
+)
+
+[
+    genrule(
+        name = "gen_byob_runtime_container_with_dir_tar_{}".format(user.flavor),
+        srcs = [
+            ":byob_runtime_base.tar",
+            ":byob_runtime_tar_{}.tar".format(user.flavor),
+            ":container_config_{}.tar".format(user.user),
+        ],
+        outs = ["byob_runtime_container_with_dir_{}.tar".format(user.flavor)],
+        cmd_bash = """
+TMPDIR="$$(mktemp --directory roma_container_tmp.XXXXXXXXXX)"
+MACHINE="$$(uname --machine)"
+mkdir --parents --mode=700 "$$TMPDIR/{roma_container_dir}/{roma_container_root_dir}"
+tar --extract --file="$(location :byob_runtime_base.tar)" --directory="$$TMPDIR/{roma_container_dir}/{roma_container_root_dir}"
+tar --extract --file="$(location :byob_runtime_tar_{flavor}.tar)" --directory="$$TMPDIR/{roma_container_dir}/{roma_container_root_dir}"
+tar --extract --file="$(location :container_config_{flavor}.tar)" --directory="$$TMPDIR/{roma_container_dir}"
+
+readonly ROOT_DIR="$${{TMPDIR}}/{roma_container_dir}/{roma_container_root_dir}"
+if [[ -d $${{ROOT_DIR}}/lib64 ]]; then
+  TARGET_DIR="$${{ROOT_DIR}}/lib64"
+elif [[ -d $${{ROOT_DIR}}/lib ]]; then
+  TARGET_DIR="$${{ROOT_DIR}}/lib"
+else
+  printf "Error: Expecting either /lib64 or /lib to exist\n" &>/dev/stderr
+  exit -1
+fi
+cp --dereference \
+  "$${{ROOT_DIR}}/usr/lib/$${{MACHINE}}-linux-gnu"/libstdc++.so.6 \
+  "$${{ROOT_DIR}}/lib/$${{MACHINE}}-linux-gnu"/{{libc.so.6,libgcc_s.so.1,libm.so.6,libpthread.so.0}} \
+  "$${{TARGET_DIR}}"
+rm -rf "$${{ROOT_DIR}}/usr/lib"
+if [[ -d $${{ROOT_DIR}}/lib64 ]]; then
+   # move ld.so to /lib64
+  mv "$${{ROOT_DIR}}/lib/$${{MACHINE}}-linux-gnu"/ld-2.31.so "$${{ROOT_DIR}}/lib64/ld-linux-$${{MACHINE/_/-}}.so.2"
+  rm -rf "$${{ROOT_DIR}}/lib"
+fi
+# TODO: b/330312036 - Avoid compressing this tar till rules_docker is deprecated.
+tar --create --owner={user}:{uid} --group={group}:{gid} --sort=name --format=gnu --mtime="2000-01-01 10:00:00" --file=$@ --directory="$${{TMPDIR}}" "{roma_container_dir}/"
+rm -rf "$${{TMPDIR}}"
+""".format(
+            flavor = user.flavor,
+            gid = user.gid,
+            group = user.group,
+            roma_container_dir = roma_container_dir.replace("/", ""),
+            roma_container_root_dir = roma_container_root_dir,
+            uid = user.uid,
+            user = user.user,
+        ),
+        visibility = ["//visibility:public"],
+    )
+    for user in DISTROLESS_USERS
+]

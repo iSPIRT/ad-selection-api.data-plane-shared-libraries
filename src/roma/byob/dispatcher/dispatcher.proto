@@ -1,0 +1,43 @@
+// Copyright 2024 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+package privacy_sandbox.server_common.byob;
+
+service WorkerRunnerService {
+  rpc LoadBinary(LoadBinaryRequest) returns (LoadBinaryResponse) {}
+  rpc DeleteBinary(DeleteBinaryRequest) returns (DeleteBinaryResponse) {}
+  rpc Cancel(CancelRequest) returns (CancelResponse) {}
+}
+
+message LoadBinaryRequest {
+  bytes code_token = 1;
+  // Path to binary relative to the binary directory mount.
+  bytes binary_relative_path = 2;
+  int32 num_workers = 3;
+  // Whether or not logs should be stored in a file. Set to false by proto3
+  // default.
+  bool enable_log_egress = 4;
+}
+message LoadBinaryResponse {}
+
+message DeleteBinaryRequest {
+  bytes code_token = 1;
+}
+message DeleteBinaryResponse {}
+
+message CancelRequest {
+  bytes execution_token = 1;
+}
+message CancelResponse {}

@@ -1,0 +1,207 @@
+common --@aspect_rules_ts//ts:skipLibCheck=honor_tsconfig
+common --@aspect_rules_ts//ts:default_to_tsc_transpiler
+
+build --announce_rc
+build --verbose_failures
+build --compilation_mode=opt
+build --output_filter='^//((?!(third_party):).)*$'
+build --color=yes
+build --config=cpp
+build --config=roma_sandboxed
+build --config=otel
+# Disable ICU linking for googleurl.
+build --@com_google_googleurl//build_config:system_icu=0
+
+test --test_output=errors
+
+build:run_all_tests --cache_test_results=no
+test:run_all_tests --test_verbose_timeout_warnings
+
+build:cpp --client_env=BAZEL_CXXOPTS=-std=c++17
+build:cpp --cxxopt=-std=c++17
+build:cpp --client_env=CC=clang
+build:cpp --copt=-Werror=return-type
+build:cpp --copt=-Werror=thread-safety
+build:cpp --per_file_copt=external/com_github_google_quiche/quiche@-Wno-private-header
+build:cpp --per_file_copt=external/nitrokmscli_.*\.c@-Wno-int-conversion
+build:cpp --per_file_copt=src/roma/roma_service/.*@-fconstexpr-steps=1271242
+build:cpp --per_file_copt=src/roma/byob/.*@-fconstexpr-steps=1271242
+build:cpp --per_file_copt=external/(json_c|nitrokmscli_).*\.c@-Wno-implicit-function-declaration
+build:cpp --config=cpp_nowarn
+
+build:cpp_nowarn --copt=-Werror
+build:cpp_nowarn --per_file_copt=external/.*@-Wno-error
+build:cpp_nowarn --per_file_copt=src/.*_test\.cc@-Wno-unused-variable
+build:cpp_nowarn --per_file_copt=src/(metric|telemetry|encryption)/.*@-Wno-deprecated-declarations
+build:cpp_nowarn --per_file_copt=src/cpio/client_providers/.*_client_provider/.*@-Wno-deprecated-declarations
+build:cpp_nowarn --per_file_copt=src/core/blob_storage_provider/gcp/.*@-Wno-deprecated-declarations
+build:cpp_nowarn --per_file_copt=src/roma/(roma_service|sandbox|benchmark|native_function_grpc_server)/.*.cc@-Wno-deprecated-declarations
+build:cpp_nowarn --per_file_copt=src/(communication|roma)/.*\.cc@-Wno-deprecated-declarations,-Wno-vla-cxx-extension,-Wno-unknown-warning-option
+
+# Disabled due to `Code` being deprecated in tink_cc
+build:cpp_nowarn --per_file_copt=src/public/cpio/adapters/crypto_client/crypto_client\.cc@-Wno-deprecated-declarations
+build:cpp_nowarn --per_file_copt=src/public/cpio/adapters/crypto_client/crypto_client_test\.cc@-Wno-deprecated-declarations
+
+# Disabled due to `comms` and `Pointable` being deprecated in sandboxed_api
+build:cpp_nowarn --per_file_copt=src/roma/logging/logging_.*test\.cc@-Wno-deprecated-declarations
+build:cpp_nowarn --per_file_copt=src/roma/tools/v8_cli.*@-Wno-deprecated-declarations
+build:cpp_nowarn --per_file_copt=src/experimental/kevinbnaughton/roma_grpc/.*@-Wno-deprecated-declarations
+build:cpp_nowarn --per_file_copt=src/roma/byob/.*@-Wno-deprecated-declarations
+build:cpp_nowarn --per_file_copt=testing/roma/.*@-Wno-deprecated-declarations
+
+# Disabled due to necessary macro collision introduced in src/roma/sandbox/js_engine/v8_engine/v8.console.h
+build:cpp_nowarn --per_file_copt=src/roma/sandbox/worker/v8_engine_worker_test\.cc@-Wno-macro-redefined
+build:cpp_nowarn --per_file_copt=src/roma/sandbox/js_engine/v8_engine/.*@-Wno-macro-redefined
+build:cpp_nowarn --per_file_copt=src/roma/benchmark/.*@-Wno-macro-redefined
+build:cpp_nowarn --per_file_copt=src/roma/sandbox/worker_api/sapi/worker_wrapper.*@-Wno-macro-redefined
+build:cpp_nowarn --per_file_copt=src/roma/sandbox/worker_api/sapi/utils.cc@-Wno-macro-redefined
+
+build:clang-tidy --aspects @bazel_clang_tidy//clang_tidy:clang_tidy.bzl%clang_tidy_aspect
+build:clang-tidy --output_groups=report
+build:clang-tidy --@bazel_clang_tidy//:clang_tidy_config=//:clang_tidy_config
+
+build:roma_sandboxed --per_file_copt=.*sandboxed_api.*@-Wno-return-type
+build:roma_sandboxed --cxxopt=-fbracket-depth=512
+
+# depend_on_what_you_use build check.
+build:dwyu --aspects=//third_party:depend_on_what_you_use.bzl%dwyu
+build:dwyu --output_groups=dwyu
+
+try-import %workspace%/builders/.coverage.bazelrc
+
+# Common settings for all sanitizers.
+build:sanitizers_common --keep_going
+build:sanitizers_common --cache_test_results=no
+build:sanitizers_common --build_tests_only
+
+# Common settings for the address sanitizer.
+build:asan_common --config=sanitizers_common
+build:asan_common --copt=-fsanitize=address
+build:asan_common --copt=-DADDRESS_SANITIZER
+build:asan_common --copt=-O1
+build:asan_common --copt=-fno-omit-frame-pointer
+build:asan_common --linkopt=-fsanitize=address
+build:asan_common --linkopt=-fuse-ld=lld
+build:asan_common --test_tag_filters=-noasan
+build:asan_common --fission=yes
+# TODO(b/293876281): Re-enable ODR violation checking once it's fixed in the
+# ZLib library that we depend on.
+build:asan_common --action_env=ASAN_OPTIONS=detect_leaks=1:color=always:detect_odr_violation=0
+
+# Address sanitizer, set action_env to segregate cache entries
+build:asan --config=asan_common
+build:asan --action_env=PRIVACY_SANDBOX_SERVERS_ASAN=1
+build:asan --strip=never
+build:asan --compilation_mode=dbg
+build:asan --copt=-g
+build:asan --test_tag_filters=-noasan
+
+# Address sanitizer, optimized build.
+# Sometimes the asan config above produces translation units that are too large
+# for Clang to process (because of SAPI).  For just those tests we use this
+# config: this has worse debugging properties but it at least lets us run the
+# sanitizer.
+build:asanopt --config=asan_common
+build:asanopt --action_env=PRIVACY_SANDBOX_SERVERS_ASANOPT=1
+build:asanopt --test_tag_filters=asanopt
+
+# Thread sanitizer
+build:tsan --config=sanitizers_common
+build:tsan --action_env=PRIVACY_SANDBOX_SERVERS_TSAN=1
+build:tsan --strip=never
+build:tsan --copt=-fsanitize=thread
+build:tsan --copt=-DTHREAD_SANITIZER
+build:tsan --copt=-DDYNAMIC_ANNOTATIONS_ENABLED=1
+build:tsan --copt=-DDYNAMIC_ANNOTATIONS_EXTERNAL_IMPL=1
+build:tsan --copt=-O1
+build:tsan --copt=-fno-omit-frame-pointer
+build:tsan --linkopt=-fsanitize=thread
+build:tsan --test_tag_filters=-notsan
+# Note that this flag *overwrites* others and so it needs to have both
+# exclusions in it.  (E.g. the setting in build:tsan is lost.)
+test:tsan-aarch64 --test_tag_filters=-notsan-aarch64,-notsan
+
+# Memory sanitizer
+build:msan --config=sanitizers_common
+build:msan --action_env=PRIVACY_SANDBOX_SERVERS_MSAN=1
+build:msan --strip=never
+build:msan --copt=-fsanitize=memory
+build:msan --copt=-DADDRESS_SANITIZER
+build:msan --copt=-O1
+build:msan --copt=-fno-omit-frame-pointer
+build:msan --linkopt=-fsanitize=memory
+build:msan --test_tag_filters=-nomsan
+
+# Undefined Behavior sanitizer
+build:ubsan --config=sanitizers_common
+build:ubsan --action_env=PRIVACY_SANDBOX_SERVERS_UBSAN=1
+build:ubsan --strip=never
+build:ubsan --copt=-fsanitize=undefined
+build:ubsan --per_file_copt=external/.*\.cc@-fno-sanitize=undefined
+build:ubsan --copt=-O1
+build:ubsan --copt=-fno-omit-frame-pointer
+build:ubsan --per_file_copt=//src/roma/sandbox/worker_api/.*@-DUNDEFINED_BEHAVIOR_SANITIZER
+build:ubsan --linkopt=-lubsan
+build:ubsan --linkopt=-fsanitize=undefined
+build:ubsan --copt=-fno-sanitize=function
+build:ubsan --copt=-fno-sanitize=vptr
+build:ubsan --test_tag_filters=-noubsan
+
+# Required to build OpenTelemetry with Abseil
+build:otel --@io_opentelemetry_cpp//api:with_abseil
+# Required to build OpenTelemtry with logs API.
+# TODO(b/287675870): Delete the following when the feature is no longer experimental.
+build:otel --copt=-DENABLE_LOGS_PREVIEW
+
+build:instance_local --//:instance=local
+
+build:instance_gcp --//:instance=gcp
+
+build:instance_aws --//:instance=aws
+
+build:instance_azure --//:instance=azure
+
+build:platform_aws --//:platform=aws
+
+build:platform_azure --//:platform=azure
+
+build:platform_gcp --//:platform=gcp
+
+build:local_aws --config=instance_local
+build:local_aws --config=platform_aws
+
+build:local_gcp --config=instance_local
+build:local_gcp --config=platform_gcp
+
+build:gcp_gcp --config=instance_gcp
+build:gcp_gcp --config=platform_gcp
+
+
+build:aws_aws --config=instance_aws
+build:aws_aws --config=platform_aws
+
+
+build:local_azure --config=instance_local
+build:local_azure --config=platform_azure
+
+build:azure_azure --config=instance_azure
+build:azure_azure --config=platform_azure
+build:prod --//:build_flavor=prod
+build:non_prod --//:build_flavor=non_prod
+build:non_sapi --//:build_flavor=non_sapi
+
+# Enable optimized build.
+build:benchmark --compilation_mode=opt
+# Link the benchmark test binary statically.
+build:benchmark --dynamic_mode=off
+# Generate `-gmlt` level of debug information. This ensures that inlined
+# portions of the stacks and the source filename and line numbers are included
+# in the debug information and become available in `pprof` profiles.
+build:benchmark --copt=-gmlt
+# Disable (note the minus sign after the `=`) using `-fPIC` for binaries in
+# `opt` compilation mode.
+build:benchmark --features=-prefer_pic_for_opt_binaries
+
+# Setup java compiler
+build --extra_toolchains=@graalvm//:toolchain
+build --java_runtime_version=graalvm_20

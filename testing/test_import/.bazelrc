@@ -1,0 +1,13 @@
+build --verbose_failures
+build --client_env=CC=clang
+build --cxxopt=-std=c++17
+build --copt=-Werror=return-type
+build -c fastbuild
+build --output_filter='^//((?!(third_party):).)*$'`
+build --color=yes
+build --client_env=BAZEL_CXXOPTS=-std=c++17
+
+test --test_output=errors
+
+build:run_all_tests --cache_test_results=no
+test:run_all_tests --test_verbose_timeout_warnings

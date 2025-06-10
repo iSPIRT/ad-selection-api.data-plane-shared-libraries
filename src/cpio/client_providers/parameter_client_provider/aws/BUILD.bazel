@@ -1,0 +1,90 @@
+# Copyright 2022 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+package(default_visibility = ["//src:scp_internal_pkg"])
+
+cc_library(
+    name = "aws_parameter_client_provider",
+    srcs = ["aws_parameter_client_provider.cc"],
+    hdrs = ["aws_parameter_client_provider.h"],
+    deps = [
+        ":error_codes",
+        ":ssm_error_converter",
+        "//src/core/async_executor/aws:aws_async_executor",
+        "//src/cpio/client_providers/instance_client_provider/aws:aws_instance_client_provider",
+        "//src/cpio/client_providers/interface:cpio_client_providers_interface",
+        "//src/cpio/client_providers/interface:type_def",
+        "//src/cpio/common/aws:aws_utils",
+        "//src/public/cpio/interface:cpio_errors",
+        "//src/public/cpio/proto/parameter_service/v1:parameter_service_cc_proto",
+        "//src/util/status_macro:status_macros",
+        "@aws_sdk_cpp//:core",
+        "@aws_sdk_cpp//:ssm",
+        "@com_google_absl//absl/base:nullability",
+    ],
+)
+
+cc_library(
+    name = "error_codes",
+    hdrs = ["error_codes.h"],
+    deps = [
+        "//src/core/async_executor/aws:aws_async_executor",
+        "//src/cpio/client_providers/instance_client_provider/aws:aws_instance_client_provider",
+        "//src/cpio/client_providers/interface:cpio_client_providers_interface",
+        "//src/cpio/client_providers/interface:type_def",
+        "//src/cpio/common/aws:aws_utils",
+        "//src/public/cpio/interface:cpio_errors",
+        "//src/public/cpio/proto/parameter_service/v1:parameter_service_cc_proto",
+        "//src/util/status_macro:status_macros",
+        "@aws_sdk_cpp//:core",
+        "@aws_sdk_cpp//:ssm",
+        "@com_google_absl//absl/base:nullability",
+    ],
+)
+
+cc_library(
+    name = "ssm_error_converter",
+    srcs = ["ssm_error_converter.cc"],
+    hdrs = ["ssm_error_converter.h"],
+    deps = [
+        ":error_codes",
+        "//src/core/async_executor/aws:aws_async_executor",
+        "//src/cpio/client_providers/instance_client_provider/aws:aws_instance_client_provider",
+        "//src/cpio/client_providers/interface:cpio_client_providers_interface",
+        "//src/cpio/client_providers/interface:type_def",
+        "//src/cpio/common/aws:aws_utils",
+        "//src/public/cpio/interface:cpio_errors",
+        "//src/public/cpio/proto/parameter_service/v1:parameter_service_cc_proto",
+        "//src/util/status_macro:status_macros",
+        "@aws_sdk_cpp//:core",
+        "@aws_sdk_cpp//:ssm",
+        "@com_google_absl//absl/base:nullability",
+    ],
+)
+
+cc_test(
+    name = "ssm_error_converter_test",
+    size = "small",
+    srcs = ["ssm_error_converter_test.cc"],
+    deps = [
+        ":error_codes",
+        ":ssm_error_converter",
+        "//src/core/interface",
+        "//src/cpio/common/aws:aws_utils",
+        "//src/public/core:test_execution_result_matchers",
+        "@com_google_googletest//:gtest_main",
+    ],
+)

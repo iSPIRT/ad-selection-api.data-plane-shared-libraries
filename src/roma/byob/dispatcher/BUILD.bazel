@@ -1,0 +1,130 @@
+load("@com_google_googleapis_imports//:imports.bzl", "cc_grpc_library")
+load("@rules_buf//buf:defs.bzl", "buf_lint_test")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library", "cc_test")
+load("@rules_proto//proto:defs.bzl", "proto_library")
+
+cc_library(
+    name = "interface",
+    hdrs = ["interface.h"],
+    visibility = ["//src/roma/byob:__subpackages__"],
+)
+
+cc_library(
+    name = "dispatcher",
+    srcs = ["dispatcher.cc"],
+    hdrs = ["dispatcher.h"],
+    visibility = ["//src/roma/byob:__subpackages__"],
+    deps = [
+        ":dispatcher_cc_proto",
+        ":dispatcher_grpc",
+        ":interface",
+        "//src/core/common/uuid",
+        "//src/roma/byob/utility:file_reader",
+        "//src/roma/byob/utility:utils",
+        "//src/roma/config:function_binding_object_v2",
+        "//src/roma/interface:function_binding_io_cc_proto",
+        "//src/util:execution_token",
+        "//src/util/status_macro:status_util",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/functional:any_invocable",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_protobuf//:protobuf",
+    ],
+)
+
+cc_binary(
+    name = "run_workers_without_sandbox",
+    testonly = True,
+    srcs = ["run_workers_without_sandbox.cc"],
+    deps = [
+        ":dispatcher_cc_proto",
+        ":dispatcher_grpc",
+        ":interface",
+        "//src/core/common/uuid",
+        "//src/util/status_macro:status_macros",
+        "//src/util/status_macro:status_util",
+        "@com_github_grpc_grpc//:grpc++",
+        "@com_google_absl//absl/cleanup",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/flags:parse",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/log:initialize",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_protobuf//:protobuf",
+    ],
+)
+
+cc_test(
+    name = "dispatcher_test",
+    size = "small",
+    srcs = ["dispatcher_test.cc"],
+    data = ["//src/roma/byob/sample_udf:new_udf"],
+    deps = [
+        ":dispatcher",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "dispatcher_udf_test",
+    size = "medium",
+    timeout = "short",
+    srcs = ["dispatcher_udf_test.cc"],
+    data = [
+        ":run_workers_without_sandbox",
+        "//src/roma/byob/sample_udf",
+        "//src/roma/byob/sample_udf:abort_late_udf",
+        "//src/roma/byob/sample_udf:new_udf",
+        "//src/roma/byob/sample_udf:nonzero_return_udf",
+        "//src/roma/byob/sample_udf:pause_udf",
+        "//src/roma/byob/sample_udf:sample_go_udf",
+        "//src/roma/config:function_binding_object_v2",
+        "@com_google_absl//absl/time",
+    ],
+    tags = [
+        "noasan",
+        "notsan",
+    ],
+    deps = [
+        ":dispatcher",
+        "//src/roma/byob/sample_udf:sample_byob_sdk_cc_proto",
+        "//src/roma/config",
+        "//src/util:execution_token",
+        "@com_google_absl//absl/cleanup",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_googletest//:gtest_main",
+        "@com_google_protobuf//:protobuf",
+    ],
+)
+
+proto_library(
+    name = "dispatcher_proto",
+    srcs = ["dispatcher.proto"],
+)
+
+cc_proto_library(
+    name = "dispatcher_cc_proto",
+    visibility = ["//src/roma/byob/container:__subpackages__"],
+    deps = [":dispatcher_proto"],
+)
+
+cc_grpc_library(
+    name = "dispatcher_grpc",
+    srcs = [":dispatcher_proto"],
+    grpc_only = True,
+    visibility = ["//src/roma/byob/container:__subpackages__"],
+    deps = [":dispatcher_cc_proto"],
+)
+
+buf_lint_test(
+    name = "dispatcher_proto_proto_lint",
+    size = "small",
+    config = "//src:buf.yaml",
+    targets = [":dispatcher_proto"],
+)
