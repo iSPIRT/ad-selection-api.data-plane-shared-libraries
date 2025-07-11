@@ -29,11 +29,12 @@
 name: SonarCloud analysis
 
 on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
   workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to run analysis on'
+        required: true
+        default: 'main'
 
 permissions:
   pull-requests: read # allows SonarCloud to decorate PRs with analysis results
