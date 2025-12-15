@@ -253,7 +253,7 @@ int main(int argc, char** argv) {
   absl::ParseCommandLine(argc, argv);
 
   // Setup
-  const auto get_token_url = absl::GetFlag(FLAGS_get_token_url);
+  auto get_token_url = absl::GetFlag(FLAGS_get_token_url);
   setenv("AZURE_BA_PARAM_GET_TOKEN_URL", get_token_url.c_str(), 0);
   const auto client_id = absl::GetFlag(FLAGS_client_id);
   setenv("AZURE_BA_PARAM_CLIENT_ID", client_id.c_str(), 0);
