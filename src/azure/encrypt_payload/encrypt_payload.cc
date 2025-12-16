@@ -80,6 +80,9 @@ ABSL_FLAG(std::string, get_token_url, "get_token_url",
           "http://127.0.0.1:8000/metadata/identity/oauth2/"
           "token?api-version=2018-02-01");
 
+ABSL_FLAG(std::string, client_id, "", "client_id", 
+          "Client ID for Azure AD application");
+
 namespace privacy_sandbox::azure_encrypt_payload {
 namespace {
 // 45 days. Value for private_key_cache_ttl_seconds in
