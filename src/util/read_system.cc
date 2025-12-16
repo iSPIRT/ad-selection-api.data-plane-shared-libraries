@@ -115,8 +115,7 @@ Utilization ReadCpuTime(const std::vector<size_t>& cpu_times,
 }  // namespace internal
 
 absl::flat_hash_map<std::string, double> GetCpu() {
-  struct sysinfo info;
-  std::memset(&info, 0, sizeof(info));
+  struct sysinfo info{};
   absl::flat_hash_map<std::string, double> ret;
   if (::sysinfo(&info) < 0) {
     ABSL_LOG_EVERY_N_SEC(ERROR, kLogInterval)
@@ -180,8 +179,12 @@ absl::flat_hash_map<std::string, double> GetMemory() {
   while (ret.size() < 2 && std::fgets(buff, sizeof(buff), fd) != nullptr) {
     if (absl::StartsWith(buff, "MemTotal") ||
         absl::StartsWith(buff, "MemAvailable")) {
-      std::sscanf(buff, "%s %lu %s", name, &value, unit);
-      ret[name] = value;
+      if (std::sscanf(buff, "%63s %ld %15s", name, &value, unit) == 3) {
+        ret[name] = value;
+      } else {
+        ABSL_LOG_EVERY_N_SEC(ERROR, kLogInterval)
+            << "Failed to parse memory info from: " << buff;
+      }
     }
   }
   std::fclose(fd);
@@ -195,8 +198,12 @@ absl::flat_hash_map<std::string, double> GetMemory() {
 
   while (std::fgets(buff, sizeof(buff), fd) != nullptr) {
     if (absl::StartsWith(buff, "VmRSS")) {
-      std::sscanf(buff, "%s %lu %s", name, &value, unit);
-      ret["main process"] = value;
+      if (std::sscanf(buff, "%63s %ld %15s", name, &value, unit) == 3) {
+        ret["main process"] = value;
+      } else {
+        ABSL_LOG_EVERY_N_SEC(ERROR, kLogInterval)
+            << "Failed to parse VmRSS from: " << buff;
+      }
       break;
     }
   }

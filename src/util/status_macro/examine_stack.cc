@@ -47,13 +47,19 @@ static void DumpPCAndSymbol(DebugWriter* writerfn, void* arg, void* pc,
   if (absl::Symbolize(reinterpret_cast<char*>(prev_pc), tmp, sizeof(tmp)) ||
       absl::Symbolize(pc, tmp, sizeof(tmp))) {
     symbol = tmp;
+    tmp[sizeof(tmp) - 1] = '\0';
   }
   char buf[1024];
+  int result;
   if (short_format) {
-    snprintf(buf, sizeof(buf), " %s;", symbol);
+    result = snprintf(buf, sizeof(buf), " %s;", symbol);
   } else {
-    snprintf(buf, sizeof(buf), "%s@ %*p  %s\n", prefix,
-             kPrintfPointerFieldWidth, pc, symbol);
+    result = snprintf(buf, sizeof(buf), "%s@ %*p  %s\n", prefix,
+                      kPrintfPointerFieldWidth, pc, symbol);
+  }
+  // Ensure null-termination even if snprintf failed or truncated
+  if (result < 0 || result >= static_cast<int>(sizeof(buf))) {
+    buf[sizeof(buf) - 1] = '\0';
   }
   writerfn(buf, arg);
 }
