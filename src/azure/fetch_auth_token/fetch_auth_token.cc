@@ -43,11 +43,19 @@ ABSL_FLAG(std::string, get_token_url, "get_token_url",
           "http://127.0.0.1:8000/metadata/identity/oauth2/"
           "token?api-version=2018-02-01");
 
+ABSL_FLAG(std::string, client_id, "", "client_id", 
+          "Client ID for Azure AD application");
+
 int main(int argc, char** argv) {
   absl::ParseCommandLine(argc, argv);
 
-  const auto get_token_url = absl::GetFlag(FLAGS_get_token_url);
+  auto get_token_url = absl::GetFlag(FLAGS_get_token_url);
   setenv("AZURE_BA_PARAM_GET_TOKEN_URL", get_token_url.c_str(), 0);
+  const auto client_id = absl::GetFlag(FLAGS_client_id);
+  setenv("AZURE_BA_PARAM_CLIENT_ID", client_id.c_str(), 0);
+  if (!client_id.empty()) {
+    get_token_url += "&client_id=" + client_id;
+  }
 
   // Setup
   google::scp::cpio::CpioOptions cpio_options;
