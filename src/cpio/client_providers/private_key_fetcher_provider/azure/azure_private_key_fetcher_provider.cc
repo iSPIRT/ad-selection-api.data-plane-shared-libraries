@@ -259,7 +259,8 @@ std::unique_ptr<PrivateKeyFetcherProviderInterface>
 PrivateKeyFetcherProviderFactory::Create(
     HttpClientInterface* http_client,
     RoleCredentialsProviderInterface* role_credentials_provider,
-    AuthTokenProviderInterface* auth_token_provider) {
+    AuthTokenProviderInterface* auth_token_provider,
+    privacy_sandbox::server_common::log::PSLogContext& log_context) {
   return std::make_unique<AzurePrivateKeyFetcherProvider>(http_client,
                                                           auth_token_provider);
 }

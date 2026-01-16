@@ -23,6 +23,8 @@
 #include <vector>
 
 #include "absl/base/nullability.h"
+#include "absl/strings/str_cat.h"
+#include "src/core/common/global_logger/global_logger.h"
 #include "src/core/interface/async_context.h"
 #include "src/core/interface/http_client_interface.h"
 #include "src/core/interface/http_types.h"
@@ -105,6 +107,16 @@ absl::Status PrivateKeyClientProvider::ListPrivateKeys(
       request->key_vending_endpoint =
           std::make_shared<PrivateKeyVendingEndpoint>(endpoint);
 
+      // Capture info for logging before moving request
+      std::string endpoint_info = absl::StrCat(
+          "endpoint[", uri_index, "]: ", endpoint.private_key_vending_service_endpoint);
+      std::string key_info = "";
+      if (request->key_id) {
+        key_info = absl::StrCat("key_id: ", *request->key_id);
+      } else {
+        key_info = absl::StrCat("max_age_seconds: ", request->max_age_seconds);
+      }
+
       AsyncContext<PrivateKeyFetchingRequest, PrivateKeyFetchingResponse>
           fetch_private_key_context(
               std::move(request),
@@ -112,6 +124,10 @@ absl::Status PrivateKeyClientProvider::ListPrivateKeys(
                         this, list_private_keys_context, std::placeholders::_1,
                         list_keys_status, uri_index),
               list_private_keys_context);
+
+      SCP_INFO(kPrivateKeyClientProvider, list_private_keys_context.activity_id,
+               "ListPrivateKeys: Calling FetchPrivateKey for %s with %s",
+               endpoint_info.c_str(), key_info.c_str());
 
       auto execution_result =
           private_key_fetcher_->FetchPrivateKey(fetch_private_key_context);
@@ -150,11 +166,30 @@ void PrivateKeyClientProvider::OnFetchPrivateKeyCallback(
     std::shared_ptr<ListPrivateKeysStatus> list_keys_status,
     size_t uri_index) noexcept {
   if (list_keys_status->got_failure.load()) {
+    SCP_INFO(kPrivateKeyClientProvider, list_private_keys_context.activity_id,
+             "OnFetchPrivateKeyCallback: Early return due to existing failure");
     return;
   }
 
   list_keys_status->fetching_call_returned_count.fetch_add(1);
   auto execution_result = fetch_private_key_context.result;
+  
+  std::string endpoint_info = fetch_private_key_context.request
+                                  ->key_vending_endpoint
+                                  ->private_key_vending_service_endpoint;
+  
+  if (execution_result.Successful()) {
+    size_t key_count = fetch_private_key_context.response
+                           ? fetch_private_key_context.response->encryption_keys.size()
+                           : 0;
+    SCP_INFO(kPrivateKeyClientProvider, list_private_keys_context.activity_id,
+             "OnFetchPrivateKeyCallback: Fetch successful from endpoint[%zu]: %s. Found %zu encryption keys",
+             uri_index, endpoint_info.c_str(), key_count);
+  } else {
+    SCP_ERROR_CONTEXT(kPrivateKeyClientProvider, list_private_keys_context,
+             execution_result, "OnFetchPrivateKeyCallback: Fetch failed from endpoint[%zu]: %s",
+             uri_index, endpoint_info.c_str());
+  }
   if (list_keys_status->listing_method == ListingMethod::kByKeyId) {
     {
       absl::MutexLock lock(&list_keys_status->result_list[uri_index].mu);
@@ -186,10 +221,16 @@ void PrivateKeyClientProvider::OnFetchPrivateKeyCallback(
 
   for (const auto& encryption_key :
        fetch_private_key_context.response->encryption_keys) {
+    SCP_INFO(kPrivateKeyClientProvider, list_private_keys_context.activity_id,
+             "OnFetchPrivateKeyCallback: Processing encryption key with key ID: %s",
+             encryption_key->key_id->c_str());
     if (list_keys_status->listing_method == ListingMethod::kByMaxAge) {
       absl::MutexLock lock(&list_keys_status->set_mutex);
       list_keys_status->key_id_set.insert(*encryption_key->key_id);
     }
+    SCP_INFO(kPrivateKeyClientProvider, list_private_keys_context.activity_id,
+             "OnFetchPrivateKeyCallback: Decrypting encryption key with key ID: %s",
+             encryption_key->key_id->c_str());
     DecryptRequest kms_decrypt_request;
     execution_result = PrivateKeyClientUtils::GetKmsDecryptRequest(
         encryption_key, kms_decrypt_request);

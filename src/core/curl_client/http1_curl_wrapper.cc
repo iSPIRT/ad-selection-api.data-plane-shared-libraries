@@ -331,6 +331,7 @@ ExecutionResultOr<HttpResponse> Http1CurlWrapper::PerformRequest(
   std::string err_str(CURL_ERROR_SIZE, '\0');
   curl_easy_setopt(curl_.get(), CURLOPT_ERRORBUFFER, err_str.data());
 
+  SCP_INFO(kHttp1CurlWrapper, kZeroUuid, "Performing HTTP request to %s", request.path->c_str());
   // Execute the request.
   CURLcode perform_res = curl_easy_perform(curl_.get());
   if (perform_res != CURLE_OK) {

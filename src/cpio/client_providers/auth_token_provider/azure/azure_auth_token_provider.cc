@@ -28,6 +28,7 @@
 #include "absl/functional/bind_front.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
+#include "src/core/common/global_logger/global_logger.h"
 #include "src/core/common/uuid/uuid.h"
 #include "src/core/utils/base64.h"
 #include "src/public/core/interface/execution_result.h"
@@ -46,8 +47,7 @@ using google::scp::core::RetryExecutionResult;
 using google::scp::core::SuccessExecutionResult;
 using google::scp::core::Uri;
 using google::scp::core::common::kZeroUuid;
-using google::scp::core::errors::
-    SC_AZURE_INSTANCE_AUTHORIZER_PROVIDER_BAD_SESSION_TOKEN;
+using google::scp::core::errors::SC_AZURE_INSTANCE_AUTHORIZER_PROVIDER_BAD_SESSION_TOKEN;
 using google::scp::core::utils::Base64Decode;
 using google::scp::core::utils::PadBase64Encoding;
 using nlohmann::json;
@@ -71,6 +71,7 @@ constexpr char kJsonTokenTypeKey[] = "token_type";
 
 // Returns a pair of iterators - one to the beginning, one to the end.
 const auto& GetRequiredJWTComponents() {
+  SCP_INFO(kAzureAuthTokenProvider, kZeroUuid, "GetRequiredJWTComponents");
   static char const* components[3];
   using iterator_type = decltype(std::cbegin(components));
   static std::pair<iterator_type, iterator_type> iterator_pair = []() {
@@ -87,6 +88,7 @@ namespace google::scp::cpio::client_providers {
 AzureAuthTokenProvider::AzureAuthTokenProvider(
     absl::Nonnull<HttpClientInterface*> http_client)
     : http_client_(http_client), get_token_url_() {
+  SCP_INFO(kAzureAuthTokenProvider, kZeroUuid, "AzureAuthTokenProvider constructor");
   const char* value_from_env = std::getenv(kGetTokenUrlEnvVar);
   if (value_from_env) {
     get_token_url_ = std::string(value_from_env) + std::string(kGetTokenQuery);
@@ -98,6 +100,12 @@ AzureAuthTokenProvider::AzureAuthTokenProvider(
   const char* client_id_from_env = std::getenv(kClientIdEnvVar);
   if (client_id_from_env) {
     get_token_url_ += "&client_id=" + std::string(client_id_from_env);
+  }
+  SCP_INFO(kAzureAuthTokenProvider, kZeroUuid,
+           "Configured get_token_url_: %s", get_token_url_.c_str());
+  if (client_id_from_env) {
+    SCP_INFO(kAzureAuthTokenProvider, kZeroUuid,
+             "Configured client_id: %s", client_id_from_env);
   }
 }
 
@@ -126,8 +134,11 @@ ExecutionResult AzureAuthTokenProvider::GetSessionToken(
 
     get_token_context.result = execution_result;
     get_token_context.Finish();
+    // Error already logged via SCP_ERROR_CONTEXT above
     return execution_result;
   }
+  SCP_INFO(kAzureAuthTokenProvider, kZeroUuid,
+           "Successfully performed http request to fetch access token.");
 
   return SuccessExecutionResult();
 }
@@ -136,11 +147,12 @@ void AzureAuthTokenProvider::OnGetSessionTokenCallback(
     AsyncContext<GetSessionTokenRequest, GetSessionTokenResponse>&
         get_token_context,
     AsyncContext<HttpRequest, HttpResponse>& http_client_context) noexcept {
+  SCP_INFO(kAzureAuthTokenProvider, kZeroUuid, "OnGetSessionTokenCallback");
   if (!http_client_context.result.Successful()) {
     SCP_ERROR_CONTEXT(
         kAzureAuthTokenProvider, get_token_context, http_client_context.result,
         "Failed to get access token from Instance Metadata server");
-
+    // Error already logged via SCP_ERROR_CONTEXT above
     get_token_context.result = http_client_context.result;
     get_token_context.Finish();
     return;
@@ -157,6 +169,7 @@ void AzureAuthTokenProvider::OnGetSessionTokenCallback(
     SCP_ERROR_CONTEXT(
         kAzureAuthTokenProvider, get_token_context, result,
         "Received http response could not be parsed into a JSON.");
+    // Error already logged via SCP_ERROR_CONTEXT above
     get_token_context.result = result;
     get_token_context.Finish();
     return;
@@ -177,7 +190,6 @@ void AzureAuthTokenProvider::OnGetSessionTokenCallback(
     return;
   }
   get_token_context.response = std::make_shared<GetSessionTokenResponse>();
-
   uint64_t expiry_seconds;
   if (json_response[kJsonTokenExpiryKey].type() ==
       json::value_t::number_unsigned) {
@@ -216,6 +228,12 @@ void AzureAuthTokenProvider::OnGetSessionTokenCallback(
 
   get_token_context.result = SuccessExecutionResult();
   get_token_context.Finish();
+  SCP_INFO(kAzureAuthTokenProvider, get_token_context.activity_id,
+           "Successfully got access token from Instance Metadata server");
+  SCP_INFO(kAzureAuthTokenProvider, get_token_context.activity_id,
+           "Access Token Type: %s",
+           json_response[kJsonTokenTypeKey].get<std::string>().c_str());
+
 }
 
 ExecutionResult AzureAuthTokenProvider::GetSessionTokenForTargetAudience(

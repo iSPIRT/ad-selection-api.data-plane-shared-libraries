@@ -97,6 +97,11 @@ constexpr char kWrappingKey[] = "wrappingKey";
 absl::Status AzureKmsClientProvider::Decrypt(
     core::AsyncContext<DecryptRequest, DecryptResponse>&
         decrypt_context) noexcept {
+  SCP_INFO(kAzureKmsClientProvider, decrypt_context.activity_id,
+           "Decrypt: Starting KMS decrypt request for key: %s, ciphertext_length: %zu",
+           decrypt_context.request->key_resource_name().c_str(),
+           decrypt_context.request->ciphertext().size());
+  
   auto get_credentials_request = std::make_shared<GetSessionTokenRequest>();
   AsyncContext<GetSessionTokenRequest, GetSessionTokenResponse>
       get_token_context(
@@ -110,12 +115,15 @@ absl::Status AzureKmsClientProvider::Decrypt(
           auth_token_provider_->GetSessionToken(get_token_context);
       !execution_result.Successful()) {
     SCP_ERROR_CONTEXT(kAzureKmsClientProvider, decrypt_context,
-                      execution_result, "Failed to get the session token.");
+                      execution_result, "Failed to get the session token for KMS decrypt.");
     decrypt_context.Finish(execution_result);
 
     return absl::UnknownError(google::scp::core::errors::GetErrorMessage(
         execution_result.status_code));
   }
+
+  SCP_INFO(kAzureKmsClientProvider, decrypt_context.activity_id,
+           "Decrypt: Successfully initiated GetSessionToken request");
 
   return absl::OkStatus();
 }
@@ -124,6 +132,9 @@ void AzureKmsClientProvider::GetSessionCredentialsCallbackToDecrypt(
     core::AsyncContext<DecryptRequest, DecryptResponse>& decrypt_context,
     core::AsyncContext<GetSessionTokenRequest, GetSessionTokenResponse>&
         get_token_context) noexcept {
+  SCP_INFO(kAzureKmsClientProvider, decrypt_context.activity_id,
+           "GetSessionCredentialsCallbackToDecrypt: Received auth token callback");
+  
   if (!get_token_context.result.Successful()) {
     SCP_ERROR_CONTEXT(kAzureKmsClientProvider, decrypt_context,
                       get_token_context.result,
@@ -134,6 +145,9 @@ void AzureKmsClientProvider::GetSessionCredentialsCallbackToDecrypt(
   }
 
   const auto& access_token = *get_token_context.response->session_token;
+  SCP_INFO(kAzureKmsClientProvider, decrypt_context.activity_id,
+           "GetSessionCredentialsCallbackToDecrypt: Got access token, length: %zu",
+           access_token.size());
 
   const auto& ciphertext = decrypt_context.request->ciphertext();
   if (ciphertext.empty()) {
@@ -170,13 +184,22 @@ void AzureKmsClientProvider::GetSessionCredentialsCallbackToDecrypt(
     const char* value_from_env = std::getenv(kAzureKmsUnwrapUrlEnvVar);
     if (value_from_env) {
       unwrap_url_ = value_from_env;
+      SCP_INFO(kAzureKmsClientProvider, decrypt_context.activity_id,
+               "GetSessionCredentialsCallbackToDecrypt: Using KMS unwrap URL from env: %s",
+               unwrap_url_.c_str());
     } else {
       unwrap_url_ = kDefaultKmsUnwrapPath;
+      SCP_INFO(kAzureKmsClientProvider, decrypt_context.activity_id,
+               "GetSessionCredentialsCallbackToDecrypt: Using default KMS unwrap URL: %s",
+               unwrap_url_.c_str());
     }
   }
   http_context.request->path = std::make_shared<Uri>(unwrap_url_);
   http_context.request->method = HttpMethod::POST;
 
+  SCP_INFO(kAzureKmsClientProvider, decrypt_context.activity_id,
+           "GetSessionCredentialsCallbackToDecrypt: Generating wrapping key pair...");
+  
   const auto wrapping_key_pair_or = GenerateWrappingKeyPair();
   if (!wrapping_key_pair_or.ok()) {
     std::string error_message = "Failed to generate wrapping key : ";
@@ -209,9 +232,16 @@ void AzureKmsClientProvider::GetSessionCredentialsCallbackToDecrypt(
   }
   hex_hash_on_wrapping_key = hex_hash_on_wrapping_key_or.value();
 
+  SCP_INFO(kAzureKmsClientProvider, decrypt_context.activity_id,
+           "GetSessionCredentialsCallbackToDecrypt: Fetching SNP attestation with hex_hash: %s",
+           hex_hash_on_wrapping_key.c_str());
+  
   // Get Attestation Report
   const auto report = FetchSnpAttestation(hex_hash_on_wrapping_key);
   CHECK(report.has_value()) << "Failed to get attestation report";
+
+  SCP_INFO(kAzureKmsClientProvider, decrypt_context.activity_id,
+           "GetSessionCredentialsCallbackToDecrypt: Successfully got attestation report");
 
   nlohmann::json payload;
   payload[kWrapped] = ciphertext;
@@ -237,6 +267,10 @@ void AzureKmsClientProvider::GetSessionCredentialsCallbackToDecrypt(
       {std::string(kAuthorizationHeaderKey),
        absl::StrCat(kBearerTokenPrefix, access_token)});
 
+  SCP_INFO(kAzureKmsClientProvider, decrypt_context.activity_id,
+           "GetSessionCredentialsCallbackToDecrypt: Sending HTTP POST to KMS unwrap endpoint: %s, wrapped_kid: %s",
+           unwrap_url_.c_str(), key_id.c_str());
+
   http_context.callback = bind(&AzureKmsClientProvider::OnDecryptCallback, this,
                                decrypt_context, wrapping_key_pair.first, _1);
 
@@ -256,6 +290,9 @@ void AzureKmsClientProvider::OnDecryptCallback(
     AsyncContext<DecryptRequest, DecryptResponse>& decrypt_context,
     std::shared_ptr<EvpPkeyWrapper> ephemeral_private_key,
     AsyncContext<HttpRequest, HttpResponse>& http_client_context) noexcept {
+  SCP_INFO(kAzureKmsClientProvider, decrypt_context.activity_id,
+           "OnDecryptCallback: Received response from KMS unwrap endpoint");
+  
   if (!http_client_context.result.Successful()) {
     SCP_ERROR_CONTEXT(kAzureKmsClientProvider, decrypt_context,
                       http_client_context.result,
@@ -264,6 +301,10 @@ void AzureKmsClientProvider::OnDecryptCallback(
     decrypt_context.Finish();
     return;
   }
+
+  SCP_INFO(kAzureKmsClientProvider, decrypt_context.activity_id,
+           "OnDecryptCallback: HTTP request successful, response body size: %zu",
+           http_client_context.response->body.bytes->size());
 
   std::string resp(http_client_context.response->body.bytes->begin(),
                    http_client_context.response->body.bytes->end());

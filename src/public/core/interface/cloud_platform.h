@@ -25,6 +25,7 @@ namespace privacy_sandbox::server_common {
 inline constexpr std::string_view kLocal = "local";
 inline constexpr std::string_view kGcp = "GCP";
 inline constexpr std::string_view kAws = "AWS";
+inline constexpr std::string_view kAzure = "Azure";
 
 // Declare cloud platforms supported.
 // Need to update key refresh monitoring code in src/metric/key_fetch.h when
@@ -46,6 +47,8 @@ constexpr inline std::string_view CloudPlatformEnumToString(
       return kGcp;
     case CloudPlatform::kAws:
       return kAws;
+    case CloudPlatform::kAzure:
+      return kAzure;   
   }
 }
 

@@ -18,6 +18,7 @@
 
 #include <memory>
 #include <utility>
+#include <iomanip>  // Add this line to include the iomanip header
 
 using google::scp::cpio::client_providers::AzureKmsClientProviderUtils;
 

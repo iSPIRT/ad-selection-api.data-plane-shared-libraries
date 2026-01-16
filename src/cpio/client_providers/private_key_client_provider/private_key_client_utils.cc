@@ -76,8 +76,17 @@ namespace google::scp::cpio::client_providers {
 ExecutionResult PrivateKeyClientUtils::GetKmsDecryptRequest(
     const std::shared_ptr<EncryptionKey>& encryption_key,
     DecryptRequest& kms_decrypt_request) noexcept {
+  SCP_INFO(kPrivateKeyClientUtils, kZeroUuid,
+           "GetKmsDecryptRequest: Starting for key_id: %s, encryption_key_type: %d",
+           encryption_key->key_id->c_str(),
+           static_cast<int>(encryption_key->encryption_key_type));
+  
   if (encryption_key->encryption_key_type ==
       EncryptionKeyType::kSinglePartyHybridKey) {
+    SCP_INFO(kPrivateKeyClientUtils, kZeroUuid,
+             "GetKmsDecryptRequest: Processing SinglePartyHybridKey with %zu key_data entries",
+             encryption_key->key_data.size());
+    
     if (encryption_key->key_data.size() != 1) {
       auto execution_result = FailureExecutionResult(
           SC_PRIVATE_KEY_CLIENT_PROVIDER_INVALID_KEY_DATA_COUNT);
@@ -111,23 +120,52 @@ ExecutionResult PrivateKeyClientUtils::GetKmsDecryptRequest(
     kms_decrypt_request.set_ciphertext(std::move(escaped_ciphertext));
     kms_decrypt_request.set_key_resource_name(
         key_data->key_encryption_key_uri->substr(kKeyArnPrefixSize));
+    
+    SCP_INFO(kPrivateKeyClientUtils, kZeroUuid,
+             "GetKmsDecryptRequest: SinglePartyHybridKey - key_resource_name: %s, ciphertext_length: %zu",
+             kms_decrypt_request.key_resource_name().c_str(),
+             kms_decrypt_request.ciphertext().size());
+    
     return SuccessExecutionResult();
   } else if (encryption_key->encryption_key_type ==
              EncryptionKeyType::kMultiPartyHybridEvenKeysplit) {
+    SCP_INFO(kPrivateKeyClientUtils, kZeroUuid,
+             "GetKmsDecryptRequest: Processing MultiPartyHybridEvenKeysplit with %zu key_data entries",
+             encryption_key->key_data.size());
+    
     for (auto key_data : encryption_key->key_data) {
       if (key_data->key_material && !key_data->key_material->empty()) {
+        SCP_INFO(kPrivateKeyClientUtils, kZeroUuid,
+                 "GetKmsDecryptRequest: Found key_data with material, key_encryption_key_uri: %s",
+                 key_data->key_encryption_key_uri->c_str());
+        
         if (key_data->key_encryption_key_uri->size() < kKeyArnPrefixSize) {
+          SCP_ERROR(kPrivateKeyClientUtils, kZeroUuid,
+                    FailureExecutionResult(SC_PRIVATE_KEY_CLIENT_PROVIDER_INVALID_KEY_RESOURCE_NAME),
+                    "key_encryption_key_uri too short: %zu < %d",
+                    key_data->key_encryption_key_uri->size(), kKeyArnPrefixSize);
           return FailureExecutionResult(
               SC_PRIVATE_KEY_CLIENT_PROVIDER_INVALID_KEY_RESOURCE_NAME);
         }
         kms_decrypt_request.set_key_resource_name(
             key_data->key_encryption_key_uri->substr(kKeyArnPrefixSize));
         kms_decrypt_request.set_ciphertext(*key_data->key_material);
+        
+        SCP_INFO(kPrivateKeyClientUtils, kZeroUuid,
+                 "GetKmsDecryptRequest: MultiPartyHybridEvenKeysplit - key_resource_name: %s, ciphertext_length: %zu",
+                 kms_decrypt_request.key_resource_name().c_str(),
+                 kms_decrypt_request.ciphertext().size());
+        
         return SuccessExecutionResult();
       }
     }
   }
 
+  SCP_ERROR(kPrivateKeyClientUtils, kZeroUuid,
+            FailureExecutionResult(SC_PRIVATE_KEY_CLIENT_PROVIDER_KEY_DATA_NOT_FOUND),
+            "GetKmsDecryptRequest: No valid key_data found for key_id: %s",
+            encryption_key->key_id->c_str());
+  
   return FailureExecutionResult(
       SC_PRIVATE_KEY_CLIENT_PROVIDER_KEY_DATA_NOT_FOUND);
 }
