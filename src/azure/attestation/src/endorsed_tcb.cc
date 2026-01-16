@@ -29,12 +29,12 @@ std::string getSnpEndorsedTcb() {
   std::string endorsed_tcb_reversed_endian = host_certs_json["tcbm"];
 
   // Reverse the endianess of the endorsed TCB
-  std::string endorsed_tcb = "";
-  for (int i = endorsed_tcb_reversed_endian.length() - 2; i >= 0; i -= 2) {
-    endorsed_tcb += endorsed_tcb_reversed_endian.substr(i, 2);
-  }
+  //std::string endorsed_tcb = "";
+  //for (int i = endorsed_tcb_reversed_endian.length() - 2; i >= 0; i -= 2) {
+  //  endorsed_tcb += endorsed_tcb_reversed_endian.substr(i, 2);
+  //}
 
-  return endorsed_tcb;
+  return endorsed_tcb_reversed_endian;
 }
 
 }  // namespace google::scp::azure::attestation
