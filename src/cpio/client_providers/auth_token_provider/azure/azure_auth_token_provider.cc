@@ -64,6 +64,7 @@ constexpr char kDefaultGetTokenUrl[] =
 constexpr char kGetTokenQuery[] =
     "?api-version=2018-02-01&resource=https%3A%2F%2Fmanagement.azure.com%2F";
 constexpr char kGetTokenUrlEnvVar[] = "AZURE_BA_PARAM_GET_TOKEN_URL";
+constexpr char kClientIdEnvVar[] = "AZURE_BA_PARAM_CLIENT_ID";
 constexpr char kJsonAccessTokenKey[] = "access_token";
 constexpr char kJsonTokenExpiryKey[] = "expires_in";
 constexpr char kJsonTokenTypeKey[] = "token_type";
@@ -92,6 +93,11 @@ AzureAuthTokenProvider::AzureAuthTokenProvider(
   } else {
     get_token_url_ =
         std::string(kDefaultGetTokenUrl) + std::string(kGetTokenQuery);
+  }
+
+  const char* client_id_from_env = std::getenv(kClientIdEnvVar);
+  if (client_id_from_env) {
+    get_token_url_ += "&client_id=" + std::string(client_id_from_env);
   }
 }
 
