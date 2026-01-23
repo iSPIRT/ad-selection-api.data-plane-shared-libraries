@@ -18,6 +18,7 @@
 
 #include <memory>
 #include <utility>
+#include <iomanip>
 
 using google::scp::cpio::client_providers::AzureKmsClientProviderUtils;
 

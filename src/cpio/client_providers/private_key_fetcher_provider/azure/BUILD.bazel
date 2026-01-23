@@ -94,6 +94,7 @@ cc_test(
     size = "small",
     srcs = ["azure_private_key_fetcher_provider_test.cc"],
     deps = [
+        ":nontee_azure_private_key_fetcher_provider_utils",
         "//src/core/async_executor/mock:core_async_executor_mock",
         "//src/core/http2_client/mock:http2_client_mock",
         "//src/core/interface",
