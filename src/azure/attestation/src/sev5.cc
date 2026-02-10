@@ -56,7 +56,11 @@ struct Request {
 
 std::unique_ptr<SnpReport> getReport(const std::string report_data) {
   SnpRequest request = {};
-  auto decoded_bytes = absl::HexStringToBytes(report_data);
+  // auto decoded_bytes = absl::HexStringToBytes(report_data);
+  // 'HexStringToBytes' is deprecated: Use the HexStringToBytes() that returns a bool
+  std::string decoded_bytes;
+  bool success = absl::HexStringToBytes(report_data, &decoded_bytes);
+  CHECK(success) << "Failed to decode hex string from report_data";
   size_t num_bytes_to_copy =
       std::min(decoded_bytes.size(), sizeof(request.report_data));
   std::copy(decoded_bytes.begin(), decoded_bytes.begin() + num_bytes_to_copy,

@@ -22,6 +22,8 @@
 #include <nlohmann/json.hpp>
 
 #include "absl/functional/bind_front.h"
+#include "absl/strings/str_cat.h"
+#include "src/core/common/global_logger/global_logger.h"
 #include "src/core/interface/async_context.h"
 #include "src/cpio/client_providers/interface/private_key_fetcher_provider_interface.h"
 #include "src/public/core/interface/execution_result.h"
@@ -73,6 +75,21 @@ ExecutionResult PrivateKeyFetcherProvider::Stop() noexcept {
 ExecutionResult PrivateKeyFetcherProvider::FetchPrivateKey(
     AsyncContext<PrivateKeyFetchingRequest, PrivateKeyFetchingResponse>&
         private_key_fetching_context) noexcept {
+  std::string endpoint_url = private_key_fetching_context.request
+    ->key_vending_endpoint
+    ->private_key_vending_service_endpoint;
+  std::string key_info = "";
+  if (private_key_fetching_context.request->key_id) {
+    key_info = absl::StrCat(" key_id: ", *private_key_fetching_context.request->key_id);
+  } else {
+    key_info = absl::StrCat(" max_age_seconds: ", 
+       private_key_fetching_context.request->max_age_seconds);
+  }
+
+  SCP_INFO(kPrivateKeyFetcherProvider, private_key_fetching_context.activity_id,
+    "FetchPrivateKey: Starting fetch from endpoint %s.%s",
+    endpoint_url.c_str(), key_info.c_str());
+
   AsyncContext<PrivateKeyFetchingRequest, HttpRequest>
       sign_http_request_context(
           private_key_fetching_context.request,
@@ -100,6 +117,28 @@ void PrivateKeyFetcherProvider::SignHttpRequestCallback(
     return;
   }
 
+  std::string endpoint_url = private_key_fetching_context.request
+                                 ->key_vending_endpoint
+                                 ->private_key_vending_service_endpoint;
+  std::string http_method = "";
+  if (sign_http_request_context.response) {
+    switch (sign_http_request_context.response->method) {
+      case google::scp::core::HttpMethod::GET:
+        http_method = "GET";
+        break;
+      case google::scp::core::HttpMethod::POST:
+        http_method = "POST";
+        break;
+      default:
+        http_method = "UNKNOWN";
+        break;
+    }
+  }
+
+  SCP_INFO(kPrivateKeyFetcherProvider, private_key_fetching_context.activity_id,
+           "SignHttpRequestCallback: HTTP request signed successfully. Sending %s request to %s",
+           http_method.c_str(), endpoint_url.c_str());
+  
   AsyncContext<HttpRequest, HttpResponse> http_client_context(
       std::move(sign_http_request_context.response),
       absl::bind_front(&PrivateKeyFetcherProvider::PrivateKeyFetchingCallback,
@@ -128,17 +167,59 @@ void PrivateKeyFetcherProvider::PrivateKeyFetchingCallback(
     AsyncContext<PrivateKeyFetchingRequest, PrivateKeyFetchingResponse>&
         private_key_fetching_context,
     AsyncContext<HttpRequest, HttpResponse>& http_client_context) noexcept {
+  std::string endpoint_url = private_key_fetching_context.request
+        ->key_vending_endpoint
+        ->private_key_vending_service_endpoint;
+
+  SCP_INFO(kPrivateKeyFetcherProvider, private_key_fetching_context.activity_id,
+    "PrivateKeyFetchingCallback: Received HTTP response from endpoint %s",
+    endpoint_url.c_str());
+
   private_key_fetching_context.result = http_client_context.result;
   if (!http_client_context.result.Successful()) {
-    SCP_ERROR_CONTEXT(kPrivateKeyFetcherProvider, private_key_fetching_context,
-                      private_key_fetching_context.result,
-                      "Failed to fetch private key.");
+    std::string endpoint_url = private_key_fetching_context.request
+                                    ->key_vending_endpoint
+                                    ->private_key_vending_service_endpoint;
+    std::string http_status_info = "";
+    std::string response_body_info = "";
+
+    if (http_client_context.response) {
+      http_status_info = absl::StrCat(" HTTP status code: ", 
+                                       static_cast<int>(http_client_context.response->code));
+      if (http_client_context.response->body.bytes &&
+          !http_client_context.response->body.bytes->empty()) {
+        std::string body_str(http_client_context.response->body.bytes->begin(),
+                            http_client_context.response->body.bytes->end());
+        // Limit response body length for logging
+        constexpr size_t kMaxBodyLogLength = 500;
+        if (body_str.length() > kMaxBodyLogLength) {
+          body_str = body_str.substr(0, kMaxBodyLogLength) + "... (truncated)";
+        }
+        response_body_info = absl::StrCat(" Response body: ", body_str);
+      }
+    }
+
+    SCP_ERROR_CONTEXT(
+        kPrivateKeyFetcherProvider, private_key_fetching_context,
+        private_key_fetching_context.result,
+        "Failed to fetch private key from endpoint %s.%s%s",
+        endpoint_url.c_str(), http_status_info.c_str(), response_body_info.c_str());
     auto error_message = google::scp::core::errors::GetErrorMessage(
         private_key_fetching_context.result.status_code);
     PS_LOG(ERROR, log_context_)
-        << "Failed to fetch private key. Error message: " << error_message;
+        << "Failed to fetch private key from endpoint: " << endpoint_url
+        << http_status_info << response_body_info
+        << ". Error message: " << error_message;
     private_key_fetching_context.Finish();
     return;
+  }
+
+  int http_status_code = 0;
+  if (http_client_context.response) {
+    http_status_code = static_cast<int>(http_client_context.response->code);
+    SCP_INFO(kPrivateKeyFetcherProvider, private_key_fetching_context.activity_id,
+             "PrivateKeyFetchingCallback: HTTP response successful. Status code: %d",
+             http_status_code);
   }
 
   PrivateKeyFetchingResponse response;
@@ -155,6 +236,10 @@ void PrivateKeyFetcherProvider::PrivateKeyFetchingCallback(
     return;
   }
 
+  SCP_INFO(kPrivateKeyFetcherProvider, private_key_fetching_context.activity_id,
+           "PrivateKeyFetchingCallback: Successfully parsed private key. Found %zu encryption keys",
+           response.encryption_keys.size());
+           
   private_key_fetching_context.response =
       std::make_shared<PrivateKeyFetchingResponse>(response);
   private_key_fetching_context.Finish();
