@@ -1,7 +1,9 @@
+common --noenable_bzlmod
 common --@aspect_rules_ts//ts:skipLibCheck=honor_tsconfig
 common --@aspect_rules_ts//ts:default_to_tsc_transpiler
 
 build --announce_rc
+build --features=-parse_headers
 build --verbose_failures
 build --compilation_mode=opt
 build --output_filter='^//((?!(third_party):).)*$'

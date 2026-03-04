@@ -17,43 +17,43 @@ load("@rules_oci//oci:pull.bzl", "oci_pull")
 _images = {
     "runtime-debian-debug-nonroot": {
         "arch_hashes": {
-            # cc-debian11:debug-nonroot
-            "amd64": "72b9108b17a4ef0398998d45cbc14af2f3270af374fc2aa2c74823c6c7054fac",
-            "arm64": "623676598d55f93ff93ea3b9d95f3cb5a379eca66dfcf9b2734f2cc3e5f34666",
+            # cc-debian12:debug-nonroot (Debian 12 bookworm, glibc 2.36, OpenSSL 3.x)
+            "amd64": "2513278525de3eec972c11a22fddf86c5e88beff166475cec4c74be77c31ca79",
+            "arm64": "18a9512e517d6a0fc7b94a9c6aba6f391a5f0696cb2885a94c1776d05cfc545b",
         },
         "registry": "gcr.io",
-        "repository": "distroless/cc-debian11",
+        "repository": "distroless/cc-debian12",
     },
     "runtime-debian-debug-root": {
         # debug build so we can use 'sh'. Root, for gcp coordinators
         # auth to work
-        # cc-debian11:debug
+        # cc-debian12:debug
         "arch_hashes": {
-            "amd64": "d5a2169bc2282598f0cf886a3d301269d0ee5bf7f7392184198dd41d36b70548",
-            "arm64": "6449313a9a80b2758f505c81462c492da87f76954d319f2adb55401177798cce",
+            "amd64": "b0e4fa43f85883cb7045a9e9dbe741d3cbe66f4a29de35c40f2768beaf2c3804",
+            "arm64": "225cfdcc73b5c80678285de5d53ced9a98e029497b271332bcb26cba85e81ceb",
         },
         "registry": "gcr.io",
-        "repository": "distroless/cc-debian11",
+        "repository": "distroless/cc-debian12",
     },
     "runtime-debian-nondebug-nonroot": {
         "arch_hashes": {
-            # cc-debian11:nonroot
+            # cc-debian12:nonroot
             # This image contains a minimal Linux, glibc runtime for "mostly-statically compiled" languages like Rust and D.
             # https://github.com/GoogleContainerTools/distroless/blob/main/cc/README.md
-            "amd64": "5a9e854bab8498a61a66b2cfa4e76e009111d09cb23a353aaa8d926e29a653d9",
-            "arm64": "3122cd55375a0a9f32e56a18ccd07572aeed5682421432701a03c335ab79c650",
+            "amd64": "777a0f9c056e86d661432aa63a3f513552c2b8028452ea5bb618caae2102eb3b",
+            "arm64": "03ef76d56d7dd20bf3cd62ba06a6b1818e3198d3cdda7b305a1c1e3e45819668",
         },
         "registry": "gcr.io",
-        "repository": "distroless/cc-debian11",
+        "repository": "distroless/cc-debian12",
     },
     "runtime-debian-nondebug-root": {
         "arch_hashes": {
-            # cc-debian11:latest
-            "amd64": "72f2f861fdc130b1b083f3f055bbe84b73eec8c8c48f16a435194b41feedc674",
-            "arm64": "74bbfb32c5341d7abc6de0379ffe330a9aec2819c5145c4c71917975c93b83e5",
+            # cc-debian12:latest
+            "amd64": "8837fd0a981b9d3922e8d9e55dd6340525346bbf894f7f4614b125bdb62c2aa2",
+            "arm64": "229a0daa1b35dc9614cd5b1ccb143fb60a8ac2cd25aaff0bec735bc338adabeb",
         },
         "registry": "gcr.io",
-        "repository": "distroless/cc-debian11",
+        "repository": "distroless/cc-debian12",
     },
     # Non-distroless; only for debugging purposes
     "runtime-ubuntu-fulldist-debug-root": {
