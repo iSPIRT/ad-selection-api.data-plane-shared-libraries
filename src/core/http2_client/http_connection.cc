@@ -17,9 +17,11 @@
 #include "http_connection.h"
 
 #include <algorithm>
+#include <cctype>
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -30,7 +32,6 @@
 #include <nghttp2/asio_http2_client.h>
 
 #include "absl/functional/bind_front.h"
-#include "absl/strings/ascii.h"
 #include "absl/strings/str_cat.h"
 #include "absl/time/time.h"
 #include "src/core/common/global_logger/global_logger.h"
@@ -69,6 +70,19 @@ constexpr std::string_view kHttpMethodPostTag = "POST";
 // Default outbound User-Agent when callers omit one (many WAF/OWASP CRS rules
 // require or score on this header).
 constexpr std::string_view kDefaultUserAgent = "privacy-sandbox-scp-http2-client";
+constexpr std::string_view kUserAgentHttpFieldName = "user-agent";
+
+// HTTP field-name bytes are constrained to ASCII tokens; avoids Abseil/Boost
+// helpers that vary across toolchain pins used by dependents.
+bool AsciiEqualsIgnoreCase(std::string_view a, std::string_view b) noexcept {
+  if (a.size() != b.size()) return false;
+  for (size_t i = 0; i < a.size(); ++i) {
+    const unsigned char ca = static_cast<unsigned char>(a[i]);
+    const unsigned char cb = static_cast<unsigned char>(b[i]);
+    if (std::tolower(ca) != std::tolower(cb)) return false;
+  }
+  return true;
+}
 }  // namespace
 
 namespace google::scp::core {
@@ -306,7 +320,7 @@ void HttpConnection::SendHttpRequest(
 
   bool has_user_agent = false;
   for (const auto& entry : headers) {
-    if (absl::EqualsIgnoreCase(entry.first, "user-agent")) {
+    if (AsciiEqualsIgnoreCase(entry.first, kUserAgentHttpFieldName)) {
       has_user_agent = true;
       break;
     }
