@@ -30,6 +30,7 @@
 #include <nghttp2/asio_http2_client.h>
 
 #include "absl/functional/bind_front.h"
+#include "absl/strings/ascii.h"
 #include "absl/strings/str_cat.h"
 #include "absl/time/time.h"
 #include "src/core/common/global_logger/global_logger.h"
@@ -65,6 +66,9 @@ constexpr std::string_view kContentLengthHeader = "content-length";
 constexpr std::string_view kHttp2Client = "Http2Client";
 constexpr std::string_view kHttpMethodGetTag = "GET";
 constexpr std::string_view kHttpMethodPostTag = "POST";
+// Default outbound User-Agent when callers omit one (many WAF/OWASP CRS rules
+// require or score on this header).
+constexpr std::string_view kDefaultUserAgent = "privacy-sandbox-scp-http2-client";
 }  // namespace
 
 namespace google::scp::core {
@@ -298,6 +302,18 @@ void HttpConnection::SendHttpRequest(
     for (const auto& [header, value] : *http_context.request->headers) {
       headers.insert({header, {value, false}});
     }
+  }
+
+  bool has_user_agent = false;
+  for (const auto& entry : headers) {
+    if (absl::EqualsIgnoreCase(entry.first, "user-agent")) {
+      has_user_agent = true;
+      break;
+    }
+  }
+  if (!has_user_agent) {
+    headers.insert(
+        {"user-agent", {std::string(kDefaultUserAgent), false}});
   }
 
   // TODO: handle large data, avoid copy

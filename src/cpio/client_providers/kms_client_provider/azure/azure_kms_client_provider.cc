@@ -88,6 +88,8 @@ constexpr char kAzureKmsUnwrapUrlEnvVar[] = "AZURE_BA_PARAM_KMS_UNWRAP_URL";
 
 constexpr char kAuthorizationHeaderKey[] = "Authorization";
 constexpr char kBearerTokenPrefix[] = "Bearer ";
+constexpr char kContentTypeHeaderKey[] = "content-type";
+constexpr char kApplicationJsonMime[] = "application/json";
 
 // Define properties of API calls
 constexpr char kWrappedKid[] = "wrappedKid";
@@ -266,6 +268,8 @@ void AzureKmsClientProvider::GetSessionCredentialsCallbackToDecrypt(
   http_context.request->headers->insert(
       {std::string(kAuthorizationHeaderKey),
        absl::StrCat(kBearerTokenPrefix, access_token)});
+  http_context.request->headers->insert({std::string(kContentTypeHeaderKey),
+                                         std::string(kApplicationJsonMime)});
 
   SCP_INFO(kAzureKmsClientProvider, decrypt_context.activity_id, 
     "GetSessionCredentialsCallbackToDecrypt: Sending HTTP POST to KMS unwrap endpoint: %s, wrapped_kid: %s", 
