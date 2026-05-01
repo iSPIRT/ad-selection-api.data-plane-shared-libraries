@@ -71,6 +71,10 @@ constexpr std::string_view kHttpMethodPostTag = "POST";
 // require or score on this header).
 constexpr std::string_view kDefaultUserAgent = "privacy-sandbox-scp-http2-client";
 constexpr std::string_view kUserAgentHttpFieldName = "user-agent";
+// KMS and coordinator HTTPS APIs return JSON; OWASP CRS often scores missing
+// Accept on API clients (see Application Gateway Firewall request rules).
+constexpr std::string_view kDefaultAccept = "application/json";
+constexpr std::string_view kAcceptHttpFieldName = "accept";
 
 // HTTP field-name bytes are constrained to ASCII tokens; avoids Abseil/Boost
 // helpers that vary across toolchain pins used by dependents.
@@ -328,6 +332,17 @@ void HttpConnection::SendHttpRequest(
   if (!has_user_agent) {
     headers.insert(
         {"user-agent", {std::string(kDefaultUserAgent), false}});
+  }
+
+  bool has_accept = false;
+  for (const auto& entry : headers) {
+    if (AsciiEqualsIgnoreCase(entry.first, kAcceptHttpFieldName)) {
+      has_accept = true;
+      break;
+    }
+  }
+  if (!has_accept) {
+    headers.insert({"accept", {std::string(kDefaultAccept), false}});
   }
 
   // TODO: handle large data, avoid copy
