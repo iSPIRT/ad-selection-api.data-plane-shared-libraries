@@ -108,7 +108,7 @@ TEST(PrivateKeyFetcherTest, SuccessfulRefresh_SuccessfulPKSCall) {
       });
 
   PrivateKeyFetcher fetcher(std::move(mock_private_key_client), absl::Hours(1));
-  fetcher.Refresh().IgnoreError();
+  fetcher.Refresh({}).IgnoreError();
 
   // Verify all fields were initialized correctly.
   EXPECT_TRUE(fetcher.GetKey("255").has_value());
@@ -145,9 +145,9 @@ TEST(PrivateKeyFetcherTest,
                             absl::Nanoseconds(1));
   // TTL is 1 nanosecond and we wait 1 millisecond to refresh, so the key is
   // booted from the cache.
-  fetcher.Refresh().IgnoreError();
+  fetcher.Refresh({}).IgnoreError();
   absl::SleepFor(absl::Milliseconds(1));
-  fetcher.Refresh().IgnoreError();
+  fetcher.Refresh({}).IgnoreError();
 
   EXPECT_FALSE(fetcher.GetKey("000000").has_value());
 }
@@ -177,11 +177,57 @@ TEST(PrivateKeyFetcherTest, UnsuccessfulSyncPKSCall_CleansOldKeys) {
                             absl::Nanoseconds(1));
   // TTL is 1 nanosecond and we wait 1 millisecond to refresh, so the key is
   // booted from the cache.
-  fetcher.Refresh().IgnoreError();
+  fetcher.Refresh({}).IgnoreError();
   absl::SleepFor(absl::Milliseconds(1));
-  fetcher.Refresh().IgnoreError();
+  fetcher.Refresh({}).IgnoreError();
 
   EXPECT_FALSE(fetcher.GetKey("000000").has_value());
+}
+
+TEST(PrivateKeyFetcherTest, FetchesPublishedKeyByIdAndProtectsItFromTtl) {
+  std::unique_ptr<MockPrivateKeyClient> mock_private_key_client =
+      std::make_unique<MockPrivateKeyClient>();
+
+  // A published key that is OLDER than the TTL. This simulates the previous
+  // rotation's key (N-1) still being served to clients during a grace period,
+  // while a freshly-started service would otherwise only fetch the newest key.
+  auto published_key =
+      CreateFakePrivateKey(kPrivateKey, kPublicKey, "260000000");
+  published_key.mutable_creation_time()->set_seconds(
+      ToUnixSeconds(absl::Now() - absl::Hours(2)));
+  // The newest key (N), fetched by max age.
+  auto latest_key = CreateFakePrivateKey(kPrivateKey, kPublicKey, "FF0000000");
+
+  EXPECT_CALL(*mock_private_key_client, ListPrivateKeys)
+      .WillOnce([&](ListPrivateKeysRequest request,
+                    Callback<ListPrivateKeysResponse> callback) {
+        // Phase 1: fetch the private key(s) for the published public key ID(s).
+        EXPECT_EQ(request.key_ids().size(), 1);
+        EXPECT_EQ(request.key_ids(0), "38");
+        ListPrivateKeysResponse response;
+        *response.mutable_private_keys()->Add() = published_key;
+        callback(SuccessExecutionResult(), response);
+        return absl::OkStatus();
+      })
+      .WillOnce([&](ListPrivateKeysRequest request,
+                    Callback<ListPrivateKeysResponse> callback) {
+        // Phase 2: fetch the newest key(s) by max age.
+        EXPECT_EQ(request.key_ids().size(), 0);
+        EXPECT_EQ(request.max_age_seconds(), ToInt64Seconds(absl::Hours(1)));
+        ListPrivateKeysResponse response;
+        *response.mutable_private_keys()->Add() = latest_key;
+        callback(SuccessExecutionResult(), response);
+        return absl::OkStatus();
+      });
+
+  PrivateKeyFetcher fetcher(std::move(mock_private_key_client), absl::Hours(1));
+  fetcher.Refresh({"38"}).IgnoreError();
+
+  // The published key (OHTTP id 38) is retained even though it is older than
+  // the TTL, because it is still being handed to clients.
+  EXPECT_TRUE(fetcher.GetKey("38").has_value());
+  // The newest key (OHTTP id 255) is cached as well.
+  EXPECT_TRUE(fetcher.GetKey("255").has_value());
 }
 
 }  // namespace

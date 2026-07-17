@@ -49,9 +49,13 @@ class PrivateKeyFetcher final : public PrivateKeyFetcherInterface {
   ~PrivateKeyFetcher() override = default;
 
   // Blocking.
-  // Calls the Private Key Service to fetch and store the private keys.
-  // Refresh() will also clean up any keys older than the ttl.
-  absl::Status Refresh() noexcept override;
+  // Calls the Private Key Service to fetch and store the private keys. Fetches
+  // both the newest keys (by max age) and the private keys matching
+  // `published_public_key_ids` (by ID). Refresh() also cleans up any keys older
+  // than the ttl.
+  absl::Status Refresh(
+      const std::vector<google::scp::cpio::PublicPrivateKeyPairId>&
+          published_public_key_ids) noexcept override;
 
   // Returns the corresponding PrivateKey, if present.
   std::optional<PrivateKey> GetKey(
@@ -59,6 +63,14 @@ class PrivateKeyFetcher final : public PrivateKeyFetcherInterface {
       override;
 
  private:
+  // Blocking. Issues a single ListPrivateKeys call for `request`, waits for it
+  // to complete, and caches every returned key. Returns an error if the call
+  // could not be dispatched or completed successfully. Does not perform TTL
+  // cleanup.
+  absl::Status ListAndCachePrivateKeys(
+      const google::cmrt::sdk::private_key_service::v1::ListPrivateKeysRequest&
+          request) noexcept;
+
   // PrivateKeyClient for fetching private keys from the Private Key Service.
   std::unique_ptr<google::scp::cpio::PrivateKeyClientInterface>
       private_key_client_;

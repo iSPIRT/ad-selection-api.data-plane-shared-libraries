@@ -21,6 +21,7 @@
 
 #include <google/protobuf/util/time_util.h>
 
+#include "absl/container/flat_hash_set.h"
 #include "absl/random/distributions.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -188,6 +189,22 @@ std::vector<PublicPrivateKeyPairId> PublicKeyFetcher::GetKeyIds(
   }
 
   return key_pair_ids;
+}
+
+std::vector<PublicPrivateKeyPairId> PublicKeyFetcher::GetAllKeyIds() noexcept
+    ABSL_LOCKS_EXCLUDED(mutex_) {
+  absl::MutexLock lock(&mutex_);
+  // De-duplicate: the same key ID can be published on more than one cloud
+  // platform, but we only want to fetch each private key once.
+  absl::flat_hash_set<PublicPrivateKeyPairId> unique_key_ids;
+  for (const auto& [platform, keys] : public_keys_) {
+    for (const auto& key : keys) {
+      unique_key_ids.insert(std::string(key.key_id()));
+    }
+  }
+
+  return std::vector<PublicPrivateKeyPairId>(unique_key_ids.begin(),
+                                             unique_key_ids.end());
 }
 
 std::unique_ptr<PublicKeyFetcherInterface> PublicKeyFetcherFactory::Create(

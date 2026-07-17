@@ -51,8 +51,22 @@ class PrivateKeyFetcherInterface {
  public:
   virtual ~PrivateKeyFetcherInterface() = default;
 
-  // Fetches and store the private keys for the key IDs passed into the method.
-  virtual absl::Status Refresh() noexcept = 0;
+  // Fetches and stores private keys.
+  //
+  // Two categories of keys are fetched on every refresh:
+  //   1. The most recently generated keys (fetched "by max age", as before).
+  //      This keeps long-running services ahead of a rotation so they have
+  //      tomorrow's key cached before clients start using it.
+  //   2. The private keys matching `published_public_key_ids` (fetched "by
+  //      ID"). These are the public keys the coordinator is currently handing
+  //      to clients. Fetching them explicitly guarantees that even a service
+  //      that just started up during a key-rotation grace period holds the
+  //      private key for whatever (possibly not-newest) public key clients are
+  //      encrypting with. Passing an empty vector preserves the legacy
+  //      "latest only" behavior.
+  virtual absl::Status Refresh(
+      const std::vector<google::scp::cpio::PublicPrivateKeyPairId>&
+          published_public_key_ids) noexcept = 0;
 
   // Returns the corresponding PrivateKey, if present.
   virtual std::optional<PrivateKey> GetKey(

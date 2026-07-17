@@ -63,6 +63,11 @@ class PublicKeyFetcher final : public PublicKeyFetcherInterface {
   std::vector<google::scp::cpio::PublicPrivateKeyPairId> GetKeyIds(
       CloudPlatform cloud_platform) noexcept override;
 
+  // Returns the de-duplicated IDs of every cached public key across all
+  // configured cloud platforms.
+  std::vector<google::scp::cpio::PublicPrivateKeyPairId>
+  GetAllKeyIds() noexcept override;
+
  private:
   // PublicKeyClient for fetching public keys from the Public Key Service.
   absl::flat_hash_map<

@@ -45,6 +45,15 @@ class PublicKeyFetcherInterface {
   // Returns the IDs of the cached public keys. For testing purposes only.
   virtual std::vector<google::scp::cpio::PublicPrivateKeyPairId> GetKeyIds(
       CloudPlatform cloud_platform) noexcept = 0;
+
+  // Returns the (de-duplicated) IDs of every public key currently cached across
+  // all configured cloud platforms. These are the OHTTP key IDs the coordinator
+  // is presently handing to clients, i.e. the IDs that incoming encrypted
+  // requests may carry. The private key fetcher uses this to make sure it has
+  // fetched the matching private keys, even for keys that are not the newest
+  // (e.g. during a key-rotation grace period).
+  virtual std::vector<google::scp::cpio::PublicPrivateKeyPairId>
+  GetAllKeyIds() noexcept = 0;
 };
 
 // Factory to create PublicKeyFetcher.

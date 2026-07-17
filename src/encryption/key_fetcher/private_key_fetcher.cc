@@ -19,6 +19,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/strings/escaping.h"
@@ -87,14 +88,11 @@ PrivateKeyFetcher::PrivateKeyFetcher(
       ttl_(ttl),
       log_context_(log_context) {}
 
-absl::Status PrivateKeyFetcher::Refresh() noexcept ABSL_LOCKS_EXCLUDED(mutex_) {
-  PS_VLOG(3, log_context_) << "Refreshing private keys...";
-
-  ListPrivateKeysRequest request;
-  request.set_max_age_seconds(ToInt64Seconds(ttl_));
-
+absl::Status PrivateKeyFetcher::ListAndCachePrivateKeys(
+    const ListPrivateKeysRequest& request) noexcept
+    ABSL_LOCKS_EXCLUDED(mutex_) {
   absl::Notification fetch_notify;
-  auto list_priv_key_cb = [request, &fetch_notify, this](
+  auto list_priv_key_cb = [&request, &fetch_notify, this](
                               const ExecutionResult result,
                               const ListPrivateKeysResponse response) {
     if (result.Successful()) {
@@ -177,21 +175,65 @@ absl::Status PrivateKeyFetcher::Refresh() noexcept ABSL_LOCKS_EXCLUDED(mutex_) {
 
   PS_VLOG(3, log_context_) << "Private key fetch pending...";
   fetch_notify.WaitForNotification();
+  return absl::OkStatus();
+}
+
+absl::Status PrivateKeyFetcher::Refresh(
+    const std::vector<PublicPrivateKeyPairId>& published_public_key_ids) noexcept
+    ABSL_LOCKS_EXCLUDED(mutex_) {
+  PS_VLOG(3, log_context_) << "Refreshing private keys...";
+
+  // Phase 1: explicitly fetch the private keys for the public keys the
+  // coordinator is currently publishing to clients (fetch "by ID"). This is
+  // what lets a service that just started up during a key-rotation grace
+  // period decrypt requests encrypted with a not-newest (but still published)
+  // public key. This is best effort: a failure here is logged but does not
+  // abort the refresh, so a coordinator that does not (yet) support by-ID
+  // lookups cannot wedge the service - it simply falls back to the legacy
+  // "latest only" behavior below.
+  if (!published_public_key_ids.empty()) {
+    ListPrivateKeysRequest published_request;
+    for (const auto& key_id : published_public_key_ids) {
+      published_request.add_key_ids(key_id);
+    }
+    PS_VLOG(3, log_context_) << absl::StrCat(
+        "Fetching private keys for published public key IDs: [",
+        absl::StrJoin(published_public_key_ids, ", "), "]");
+    if (const absl::Status status = ListAndCachePrivateKeys(published_request);
+        !status.ok()) {
+      PS_LOG(ERROR, log_context_)
+          << "Fetch of private keys by published public key ID failed: "
+          << status;
+    }
+  }
+
+  // Phase 2: fetch the newest keys by max age (legacy behavior). Keeps
+  // long-running services holding the next key before clients start using it.
+  ListPrivateKeysRequest latest_request;
+  latest_request.set_max_age_seconds(ToInt64Seconds(ttl_));
+  absl::Status refresh_status = ListAndCachePrivateKeys(latest_request);
 
   absl::MutexLock lock(&mutex_);
-  // Clean up keys that have been stored in the cache for longer than the ttl.
+  // Clean up keys that have been stored in the cache for longer than the ttl,
+  // EXCEPT for keys that are currently published to clients. A published key
+  // can legitimately be older than the ttl during a grace period (it is the
+  // previous rotation's key), and evicting it would re-introduce the very
+  // client/service key mismatch this refresh is meant to prevent.
+  const absl::flat_hash_set<PublicPrivateKeyPairId> published_set(
+      published_public_key_ids.begin(), published_public_key_ids.end());
   absl::Time cutoff_time = absl::Now() - ttl_;
   PS_VLOG(3, log_context_) << "Cleaning up private keys with cutoff time: "
                            << cutoff_time;
   for (auto it = private_keys_map_.cbegin(); it != private_keys_map_.cend();) {
-    if (it->second.creation_time < cutoff_time) {
+    if (it->second.creation_time < cutoff_time &&
+        !published_set.contains(it->first)) {
       private_keys_map_.erase(it++);
     } else {
       it++;
     }
   }
   KeyFetchResultCounter::SetNumPrivateKeysCached(private_keys_map_.size());
-  return absl::OkStatus();
+  return refresh_status;
 }
 
 std::optional<PrivateKey> PrivateKeyFetcher::GetKey(

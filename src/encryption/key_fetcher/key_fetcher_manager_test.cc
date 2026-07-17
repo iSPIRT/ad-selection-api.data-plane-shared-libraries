@@ -15,6 +15,7 @@
 #include "src/encryption/key_fetcher/key_fetcher_manager.h"
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -34,6 +35,9 @@
 namespace privacy_sandbox::server_common {
 namespace {
 
+using ::google::scp::cpio::PublicPrivateKeyPairId;
+using ::testing::Return;
+
 class KeyFetcherManagerTest : public ::testing::Test {
  protected:
   KeyFetcherManagerTest() {
@@ -49,9 +53,12 @@ TEST_F(KeyFetcherManagerTest, SuccessfulRefresh) {
   EXPECT_CALL(*public_key_fetcher_, Refresh).WillOnce([&]() -> absl::Status {
     return absl::OkStatus();
   });
-  EXPECT_CALL(*private_key_fetcher_, Refresh).WillOnce([&]() -> absl::Status {
-    return absl::OkStatus();
-  });
+  EXPECT_CALL(*public_key_fetcher_, GetAllKeyIds)
+      .WillRepeatedly(Return(std::vector<PublicPrivateKeyPairId>{}));
+  EXPECT_CALL(*private_key_fetcher_, Refresh)
+      .WillOnce([&](const std::vector<PublicPrivateKeyPairId>&) -> absl::Status {
+        return absl::OkStatus();
+      });
 
   KeyFetcherManager manager(absl::Minutes(1), std::move(public_key_fetcher_),
                             std::move(private_key_fetcher_));
@@ -61,9 +68,10 @@ TEST_F(KeyFetcherManagerTest, SuccessfulRefresh) {
 }
 
 TEST_F(KeyFetcherManagerTest, NullPointerForPublicKeyFetcher) {
-  EXPECT_CALL(*private_key_fetcher_, Refresh).WillOnce([]() {
-    return absl::OkStatus();
-  });
+  EXPECT_CALL(*private_key_fetcher_, Refresh)
+      .WillOnce([](const std::vector<PublicPrivateKeyPairId>&) {
+        return absl::OkStatus();
+      });
 
   KeyFetcherManager manager(absl::Minutes(1), /* public_key_fetcher= */ nullptr,
                             std::move(private_key_fetcher_));
@@ -76,9 +84,10 @@ TEST_F(KeyFetcherManagerTest, ValidateErrorMessageOnPublicKeyFetchFailure) {
   EXPECT_CALL(*public_key_fetcher_, Refresh).WillOnce([&]() -> absl::Status {
     return absl::InternalError("public key fetch failed");
   });
-  EXPECT_CALL(*private_key_fetcher_, Refresh).WillOnce([&]() -> absl::Status {
-    return absl::OkStatus();
-  });
+  EXPECT_CALL(*private_key_fetcher_, Refresh)
+      .WillOnce([&](const std::vector<PublicPrivateKeyPairId>&) -> absl::Status {
+        return absl::OkStatus();
+      });
 
   KeyFetcherManager manager(absl::Minutes(1), std::move(public_key_fetcher_),
                             std::move(private_key_fetcher_));
@@ -93,9 +102,12 @@ TEST_F(KeyFetcherManagerTest, ValidateErrorMessageOnPrivateKeyFetchFailure) {
   EXPECT_CALL(*public_key_fetcher_, Refresh).WillOnce([&]() -> absl::Status {
     return absl::OkStatus();
   });
-  EXPECT_CALL(*private_key_fetcher_, Refresh).WillOnce([&]() -> absl::Status {
-    return absl::InternalError("private key fetch failed");
-  });
+  EXPECT_CALL(*public_key_fetcher_, GetAllKeyIds)
+      .WillRepeatedly(Return(std::vector<PublicPrivateKeyPairId>{}));
+  EXPECT_CALL(*private_key_fetcher_, Refresh)
+      .WillOnce([&](const std::vector<PublicPrivateKeyPairId>&) -> absl::Status {
+        return absl::InternalError("private key fetch failed");
+      });
 
   KeyFetcherManager manager(absl::Minutes(1), std::move(public_key_fetcher_),
                             std::move(private_key_fetcher_));
@@ -111,9 +123,10 @@ TEST_F(KeyFetcherManagerTest,
   EXPECT_CALL(*public_key_fetcher_, Refresh).WillOnce([&]() -> absl::Status {
     return absl::InternalError("public key fetch failed");
   });
-  EXPECT_CALL(*private_key_fetcher_, Refresh).WillOnce([&]() -> absl::Status {
-    return absl::InternalError("private key fetch failed");
-  });
+  EXPECT_CALL(*private_key_fetcher_, Refresh)
+      .WillOnce([&](const std::vector<PublicPrivateKeyPairId>&) -> absl::Status {
+        return absl::InternalError("private key fetch failed");
+      });
 
   KeyFetcherManager manager(absl::Minutes(1), std::move(public_key_fetcher_),
                             std::move(private_key_fetcher_));
@@ -124,6 +137,56 @@ TEST_F(KeyFetcherManagerTest,
       absl::StrContains(start_result.message(), "public key fetch failed"));
   ASSERT_TRUE(
       absl::StrContains(start_result.message(), "private key fetch failed"));
+}
+
+// The readiness gate: if the coordinator is publishing a public key for which
+// the service has no matching private key (e.g. a fresh instance during a
+// grace period whose by-ID fetch did not succeed), Start() must fail so the
+// service does not accept traffic it cannot decrypt.
+TEST_F(KeyFetcherManagerTest, FailsStartWhenPublishedPrivateKeyMissing) {
+  EXPECT_CALL(*public_key_fetcher_, Refresh).WillOnce([&]() -> absl::Status {
+    return absl::OkStatus();
+  });
+  EXPECT_CALL(*public_key_fetcher_, GetAllKeyIds)
+      .WillRepeatedly(Return(std::vector<PublicPrivateKeyPairId>{"38"}));
+  EXPECT_CALL(*private_key_fetcher_, Refresh)
+      .WillOnce([&](const std::vector<PublicPrivateKeyPairId>&) -> absl::Status {
+        return absl::OkStatus();
+      });
+  EXPECT_CALL(*private_key_fetcher_, GetKey)
+      .WillRepeatedly(Return(std::optional<PrivateKey>(std::nullopt)));
+
+  KeyFetcherManager manager(absl::Minutes(1), std::move(public_key_fetcher_),
+                            std::move(private_key_fetcher_));
+
+  auto start_result = manager.Start();
+  ASSERT_FALSE(start_result.ok());
+  ASSERT_TRUE(
+      absl::StrContains(start_result.message(), "published public key ID"));
+}
+
+// When the published public key does have a matching private key cached, the
+// readiness gate passes and the service starts.
+TEST_F(KeyFetcherManagerTest, StartsWhenPublishedPrivateKeyPresent) {
+  EXPECT_CALL(*public_key_fetcher_, Refresh).WillOnce([&]() -> absl::Status {
+    return absl::OkStatus();
+  });
+  EXPECT_CALL(*public_key_fetcher_, GetAllKeyIds)
+      .WillRepeatedly(Return(std::vector<PublicPrivateKeyPairId>{"38"}));
+  EXPECT_CALL(*private_key_fetcher_, Refresh)
+      .WillOnce([&](const std::vector<PublicPrivateKeyPairId>&) -> absl::Status {
+        return absl::OkStatus();
+      });
+  PrivateKey cached_key;
+  cached_key.key_id = "38";
+  EXPECT_CALL(*private_key_fetcher_, GetKey)
+      .WillRepeatedly(Return(std::optional<PrivateKey>(cached_key)));
+
+  KeyFetcherManager manager(absl::Minutes(1), std::move(public_key_fetcher_),
+                            std::move(private_key_fetcher_));
+
+  auto start_result = manager.Start();
+  ASSERT_TRUE(start_result.ok());
 }
 
 }  // namespace
