@@ -52,6 +52,8 @@ constexpr char kAzurePrivateKeyFetcherProvider[] =
     "AzurePrivateKeyFetcherProvider";
 constexpr char kAuthorizationHeaderKey[] = "Authorization";
 constexpr char kBearerTokenPrefix[] = "Bearer ";
+constexpr char kContentTypeHeaderKey[] = "content-type";
+constexpr char kApplicationJsonMime[] = "application/json";
 
 // Define properties of API calls
 constexpr char kWrappedKid[] = "wrappedKid";
@@ -112,6 +114,8 @@ void AzurePrivateKeyFetcherProvider::OnGetSessionTokenCallback(
   http_request->headers->insert(
       {std::string(kAuthorizationHeaderKey),
        absl::StrCat(kBearerTokenPrefix, access_token)});
+  http_request->headers->insert({std::string(kContentTypeHeaderKey),
+                                   std::string(kApplicationJsonMime)});
   sign_request_context.response = std::move(http_request);
   sign_request_context.result = SuccessExecutionResult();
   sign_request_context.Finish();

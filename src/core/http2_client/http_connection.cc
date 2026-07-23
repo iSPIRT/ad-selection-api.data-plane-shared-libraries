@@ -17,9 +17,11 @@
 #include "http_connection.h"
 
 #include <algorithm>
+#include <cctype>
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -65,6 +67,26 @@ constexpr std::string_view kContentLengthHeader = "content-length";
 constexpr std::string_view kHttp2Client = "Http2Client";
 constexpr std::string_view kHttpMethodGetTag = "GET";
 constexpr std::string_view kHttpMethodPostTag = "POST";
+// Default outbound User-Agent when callers omit one (many WAF/OWASP CRS rules
+// require or score on this header).
+constexpr std::string_view kDefaultUserAgent = "privacy-sandbox-scp-http2-client";
+constexpr std::string_view kUserAgentHttpFieldName = "user-agent";
+// KMS and coordinator HTTPS APIs return JSON; OWASP CRS often scores missing
+// Accept on API clients (see Application Gateway Firewall request rules).
+constexpr std::string_view kDefaultAccept = "application/json";
+constexpr std::string_view kAcceptHttpFieldName = "accept";
+
+// HTTP field-name bytes are constrained to ASCII tokens; avoids Abseil/Boost
+// helpers that vary across toolchain pins used by dependents.
+bool AsciiEqualsIgnoreCase(std::string_view a, std::string_view b) noexcept {
+  if (a.size() != b.size()) return false;
+  for (size_t i = 0; i < a.size(); ++i) {
+    const unsigned char ca = static_cast<unsigned char>(a[i]);
+    const unsigned char cb = static_cast<unsigned char>(b[i]);
+    if (std::tolower(ca) != std::tolower(cb)) return false;
+  }
+  return true;
+}
 }  // namespace
 
 namespace google::scp::core {
@@ -298,6 +320,29 @@ void HttpConnection::SendHttpRequest(
     for (const auto& [header, value] : *http_context.request->headers) {
       headers.insert({header, {value, false}});
     }
+  }
+
+  bool has_user_agent = false;
+  for (const auto& entry : headers) {
+    if (AsciiEqualsIgnoreCase(entry.first, kUserAgentHttpFieldName)) {
+      has_user_agent = true;
+      break;
+    }
+  }
+  if (!has_user_agent) {
+    headers.insert(
+        {"user-agent", {std::string(kDefaultUserAgent), false}});
+  }
+
+  bool has_accept = false;
+  for (const auto& entry : headers) {
+    if (AsciiEqualsIgnoreCase(entry.first, kAcceptHttpFieldName)) {
+      has_accept = true;
+      break;
+    }
+  }
+  if (!has_accept) {
+    headers.insert({"accept", {std::string(kDefaultAccept), false}});
   }
 
   // TODO: handle large data, avoid copy
