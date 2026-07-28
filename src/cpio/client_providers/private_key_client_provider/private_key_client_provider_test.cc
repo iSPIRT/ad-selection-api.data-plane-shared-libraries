@@ -955,6 +955,73 @@ TEST_F(PrivateKeyClientProviderSinglePartyKeyTest, ListSinglePartyKeysSuccess) {
   response_count.WaitForNotification();
 }
 
+// Azure listpubkeys uses OHTTP key IDs in requests, while /app/key responses
+// use coordinator/KMS key IDs. Assembly must use the response key ID.
+TEST_F(PrivateKeyClientProviderSinglePartyKeyTest,
+       ListSinglePartyKeysSuccessWhenResponseKeyIdDiffersFromRequest) {
+  constexpr std::string_view kRequestOhttpKeyId = "41";
+  constexpr std::string_view kResponseCoordinatorKeyId = "29";
+
+  SetMockKmsClient(1);
+
+  EXPECT_CALL(*mock_private_key_fetcher_, FetchPrivateKey)
+      .Times(1)
+      .WillOnce([=](AsyncContext<PrivateKeyFetchingRequest,
+                                 PrivateKeyFetchingResponse>& context) {
+        EXPECT_EQ(*context.request->key_id, kRequestOhttpKeyId);
+        auto encryption_key = std::make_shared<EncryptionKey>();
+        encryption_key->resource_name =
+            std::make_shared<std::string>(kTestResourceName);
+        encryption_key->expiration_time_in_ms = kTestExpirationTime;
+        encryption_key->creation_time_in_ms = kTestCreationTime;
+        encryption_key->encryption_key_type =
+            EncryptionKeyType::kSinglePartyHybridKey;
+        encryption_key->key_id =
+            std::make_shared<std::string>(kResponseCoordinatorKeyId);
+        auto key_data = std::make_shared<KeyData>();
+        key_data->key_encryption_key_uri =
+            std::make_shared<std::string>(kTestKeyEncryptionKeyUri);
+        key_data->key_material =
+            std::make_shared<std::string>(kSinglePartyPrivateKeyJson);
+        key_data->public_key_signature =
+            std::make_shared<std::string>(kTestPublicKeySignature);
+        encryption_key->key_data.emplace_back(key_data);
+        encryption_key->public_key_material =
+            std::make_shared<std::string>(kTestPublicKeyMaterial);
+        encryption_key->public_keyset_handle =
+            std::make_shared<std::string>(kTestPublicKeysetHandle);
+
+        context.response = std::make_shared<PrivateKeyFetchingResponse>();
+        context.response->encryption_keys.emplace_back(encryption_key);
+        context.Finish(SuccessExecutionResult());
+        return context.result;
+      });
+
+  ListPrivateKeysRequest request;
+  request.add_key_ids(std::string(kRequestOhttpKeyId));
+
+  std::string encoded_private_key;
+  Base64Encode(kDecryptedSinglePartyKey, encoded_private_key);
+  absl::Notification response_count;
+  AsyncContext<ListPrivateKeysRequest, ListPrivateKeysResponse> context(
+      std::make_shared<ListPrivateKeysRequest>(request),
+      [&](AsyncContext<ListPrivateKeysRequest, ListPrivateKeysResponse>&
+              context) {
+        ASSERT_EQ(context.response->private_keys_size(), 1);
+        EXPECT_EQ(context.response->private_keys(0).key_id(),
+                  kResponseCoordinatorKeyId);
+        EXPECT_EQ(context.response->private_keys(0).public_key(),
+                  kTestPublicKeyMaterial);
+        EXPECT_EQ(context.response->private_keys(0).private_key(),
+                  encoded_private_key);
+        EXPECT_SUCCESS(context.result);
+        response_count.Notify();
+      });
+
+  EXPECT_TRUE(private_key_client_provider_->ListPrivateKeys(context).ok());
+  response_count.WaitForNotification();
+}
+
 TEST_F(PrivateKeyClientProviderSinglePartyKeyTest,
        MixedSingleAndMultiPartyPrivateKeysSuccess) {
   PrivateKeyVendingEndpoint endpoint_1;

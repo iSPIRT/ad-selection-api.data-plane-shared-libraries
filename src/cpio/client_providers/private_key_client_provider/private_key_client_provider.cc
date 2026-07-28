@@ -197,10 +197,16 @@ void PrivateKeyClientProvider::OnFetchPrivateKeyCallback(
           .fetch_result_key_id_map[*fetch_private_key_context.request->key_id] =
           execution_result;
     }
-    // For ListByKeyId, store the key IDs no matter the fetching failed or not.
-    absl::MutexLock lock(&list_keys_status->set_mutex);
-    list_keys_status->key_id_set.insert(
-        *fetch_private_key_context.request->key_id);
+    // On fetch failure or empty response, keep the requested key ID so
+    // assembly/error reporting still references what was asked for.
+    // On success, use the response encryption_key->key_id below: Azure may
+    // return a coordinator/KMS id while the request used an OHTTP id.
+    if (!execution_result.Successful() ||
+        fetch_private_key_context.response->encryption_keys.empty()) {
+      absl::MutexLock lock(&list_keys_status->set_mutex);
+      list_keys_status->key_id_set.insert(
+          *fetch_private_key_context.request->key_id);
+    }
   } else {
     list_keys_status->result_list[uri_index].fetch_result = execution_result;
   }
@@ -224,9 +230,16 @@ void PrivateKeyClientProvider::OnFetchPrivateKeyCallback(
     SCP_INFO(kPrivateKeyClientProvider, list_private_keys_context.activity_id,
       "OnFetchPrivateKeyCallback: Processing encryption key with key ID: %s",
       encryption_key->key_id->c_str());
-    if (list_keys_status->listing_method == ListingMethod::kByMaxAge) {
+    {
       absl::MutexLock lock(&list_keys_status->set_mutex);
       list_keys_status->key_id_set.insert(*encryption_key->key_id);
+    }
+    if (list_keys_status->listing_method == ListingMethod::kByKeyId) {
+      // Align fetch status with the response key ID used for decrypt assembly
+      // when request key_id (e.g. OHTTP) differs from encryption_key->key_id.
+      absl::MutexLock lock(&list_keys_status->result_list[uri_index].mu);
+      list_keys_status->result_list[uri_index]
+          .fetch_result_key_id_map[*encryption_key->key_id] = execution_result;
     }
     SCP_INFO(kPrivateKeyClientProvider, list_private_keys_context.activity_id,
       "OnFetchPrivateKeyCallback: Decrypting encryption key with key ID: %s",
