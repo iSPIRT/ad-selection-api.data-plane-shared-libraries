@@ -46,7 +46,8 @@ TEST(AzurePrivateKeyFetchingClientUtilsTest, CreateHttpRequest) {
   AzurePrivateKeyFetchingClientUtils::CreateHttpRequest(request, http_request);
 
   EXPECT_EQ(http_request.method, HttpMethod::POST);
-  EXPECT_EQ(*http_request.path, std::string(kPrivateKeyBaseUri));
+  EXPECT_EQ(*http_request.path,
+            std::string(kPrivateKeyBaseUri) + "?all=true");
 }
 
 }  // namespace google::scp::cpio::client_providers::test

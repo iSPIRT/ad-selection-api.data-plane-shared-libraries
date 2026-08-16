@@ -72,6 +72,12 @@ constexpr char kKeyResponse[] = R"({
   "wrappedKid": "NC0GVa6iXjyP90TocNFlpkzlw-1SAKq0zT6ytWuzcOQ_1",
   "wrapped": "{\"keys\":[{\"name\":\"encryptionKeys/123456\",\"encryptionKeyType\":\"SINGLE_PARTY_HYBRID_KEY\",\"publicKeysetHandle\":\"TBD\",\"publicKeyMaterial\":\"testtest\",\"creationTime\":\"1714724806912\",\"expirationTime\":\"1746260806912\",\"keyData\":[{\"publicKeySignature\":\"\",\"keyEncryptionKeyUri\":\"azu-kms://NC0GVa6iXjyP90TocNFlpkzlw-1SAKq0zT6ytWuzcOQ_1\",\"keyMaterial\":\"{\\\"encryptedKeyset\\\":\\\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\\\"}\"}]}]}"
 })";
+// Response containing multiple keys in the wrapped `keys` array, as returned by
+// the KMS /key?all=true endpoint during a key rotation grace period.
+constexpr char kMultiKeyResponse[] = R"({
+  "wrappedKid": "NC0GVa6iXjyP90TocNFlpkzlw-1SAKq0zT6ytWuzcOQ_2",
+  "wrapped": "{\"keys\":[{\"name\":\"encryptionKeys/123456\",\"encryptionKeyType\":\"SINGLE_PARTY_HYBRID_KEY\",\"publicKeysetHandle\":\"TBD\",\"publicKeyMaterial\":\"testtest\",\"creationTime\":\"1714724806912\",\"expirationTime\":\"1746260806912\",\"keyData\":[{\"publicKeySignature\":\"\",\"keyEncryptionKeyUri\":\"azu-kms://NC0GVa6iXjyP90TocNFlpkzlw-1SAKq0zT6ytWuzcOQ_1\",\"keyMaterial\":\"{\\\"encryptedKeyset\\\":\\\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\\\"}\"}]},{\"name\":\"encryptionKeys/789012\",\"encryptionKeyType\":\"SINGLE_PARTY_HYBRID_KEY\",\"publicKeysetHandle\":\"TBD\",\"publicKeyMaterial\":\"testtest\",\"creationTime\":\"1714724906912\",\"expirationTime\":\"1746260906912\",\"keyData\":[{\"publicKeySignature\":\"\",\"keyEncryptionKeyUri\":\"azu-kms://NC0GVa6iXjyP90TocNFlpkzlw-1SAKq0zT6ytWuzcOQ_2\",\"keyMaterial\":\"{\\\"encryptedKeyset\\\":\\\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\\\"}\"}]}]}"
+})";
 constexpr char kKeyResponseWithoutKeyData[] = R"({
   "wrappedKid": "NC0GVa6iXjyP90TocNFlpkzlw-1SAKq0zT6ytWuzcOQ_1",
   "wrapped": "{\"keys\":[{\"name\":\"encryptionKeys/123456\",\"encryptionKeyType\":\"SINGLE_PARTY_HYBRID_KEY\",\"publicKeysetHandle\":\"TBD\",\"publicKeyMaterial\":\"testtest\",\"creationTime\":\"1714724806912\",\"expirationTime\":\"1746260806912\",\"xx\":[{\"publicKeySignature\":\"\",\"keyEncryptionKeyUri\":\"azu-kms://NC0GVa6iXjyP90TocNFlpkzlw-1SAKq0zT6ytWuzcOQ_1\",\"keyMaterial\":\"{\\\"encryptedKeyset\\\":\\\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\\\"}\"}]}]}"
@@ -217,6 +223,31 @@ TEST_F(AzurePrivateKeyFetcherProviderTest, FetchPrivateKey) {
         const auto& encryption_key = *context.response->encryption_keys.begin();
         EXPECT_THAT(*encryption_key->resource_name,
                     StrEq("encryptionKeys/123456"));
+
+        condition.Notify();
+        return SuccessExecutionResult();
+      });
+  auto res = azure_private_key_fetcher_provider_->FetchPrivateKey(context);
+  EXPECT_THAT(res, IsSuccessful());
+  condition.WaitForNotification();
+}
+
+TEST_F(AzurePrivateKeyFetcherProviderTest, FetchAllValidPrivateKeys) {
+  MockGetSessionToken();
+  MockRequest(std::string(kPrivateKeyBaseUri));
+  MockResponse(kMultiKeyResponse);
+
+  absl::Notification condition;
+
+  AsyncContext<PrivateKeyFetchingRequest, PrivateKeyFetchingResponse> context(
+      request_, [&](AsyncContext<PrivateKeyFetchingRequest,
+                                 PrivateKeyFetchingResponse>& context) {
+        EXPECT_SUCCESS(context.result);
+        EXPECT_EQ(context.response->encryption_keys.size(), 2);
+        EXPECT_THAT(*context.response->encryption_keys[0]->resource_name,
+                    StrEq("encryptionKeys/123456"));
+        EXPECT_THAT(*context.response->encryption_keys[1]->resource_name,
+                    StrEq("encryptionKeys/789012"));
 
         condition.Notify();
         return SuccessExecutionResult();

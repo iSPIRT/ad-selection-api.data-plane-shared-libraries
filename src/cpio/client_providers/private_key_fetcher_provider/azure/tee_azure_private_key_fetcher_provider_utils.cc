@@ -41,7 +41,13 @@ void AzurePrivateKeyFetchingClientUtils::CreateHttpRequest(
       request.key_vending_endpoint->private_key_vending_service_endpoint;
   http_request.method = HttpMethod::POST;
 
-  http_request.path = std::make_shared<Uri>(base_uri);
+  // Request all currently-valid (non-expired) keys, not just the latest, so a
+  // service can cache every key a client might still be using during a key
+  // rotation grace period. The KMS returns them in the wrapped `keys` array.
+  std::string uri_with_query = base_uri;
+  uri_with_query +=
+      (base_uri.find('?') == std::string::npos ? "?all=true" : "&all=true");
+  http_request.path = std::make_shared<Uri>(uri_with_query);
 
   // Get Attestation Report
   CHECK(hasSnp()) << "It's not in a SNP environment";
